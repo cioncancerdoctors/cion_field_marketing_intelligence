@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#4B1E6B" />
+<title>CION Connect</title>
+<link rel="manifest" href="manifest.json" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f5f3f7; }
+  .cion-primary { background: #4B1E6B; }
+  .cion-primary-text { color: #4B1E6B; }
+  .cion-accent { background: #E91E63; }
+  button { touch-action: manipulation; }
+  input, select, textarea { font-size: 16px; }
+  .card-shadow { box-shadow: 0 2px 8px rgba(75, 30, 107, 0.08); }
+  .input { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; background:white; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+// =========================================
+// SECTION 1: CONFIG
+// =========================================
+const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
+
+// =========================================
+// SECTION 2: SUPABASE CLIENT
+// =========================================
+const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// =========================================
+// SECTION 3: DB HELPERS
+// =========================================
+const db = {
+  async getReps() {
+    const { data } = await supa.from('reps').select('*').eq('active', true).order('name');
+    return data || [];
+  },
+  async getZones() {
+    const { data } = await supa.from('zones').select('*').order('name');
+    return data || [];
+  },
+  async getDoctors() {
+    const { data } = await supa.from('doctors').select('*, zones(name)').order('score', { ascending: false });
+    return data || [];
+  },
+  async addDoctor(doc) {
+    return await supa.from('doctors').insert([doc]).select().single();
+  },
+  async updateDoctor(id, updates) {
+    return await supa.from('doctors').update(updates).eq('id', id);
+  },
+  async getVisits(repId, limit = 50) {
+    const { data } = await supa.from('visits')
+      .select('*, doctors(name, clinic_name)')
+      .eq('rep_id', repId)
+      .order('visited_at', { ascending: false })
+      .limit(limit);
+    return data || [];
+  },
+  async addVisit(visit) {
+    return await supa.from('visits').insert([visit]).select().single();
+  },
+  async getCards() {
+    const { data } = await supa.from('cards').select('*').eq('active', true);
+    return data || [];
+  },
+  async getTodayActions() {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supa.from('doctors')
+      .select('*, zones(name)')
+      .lte('next_followup', today)
+      .not('next_followup', 'is', null)
+      .order('score', { ascending: false });
+    return data || [];
+  },
+  async getDashboardStats() {
+    const { data: visits } = await supa.from('visits').select('rep_id, doctor_id, interest, visited_at, met_status');
+    const { data: reps } = await supa.from('reps').select('*').eq('role', 'rep');
+    const { data: doctors } = await supa.from('doctors').select('tier, zone_id, zones(name)');
+    return { visits: visits || [], reps: reps || [], doctors: doctors || [] };
+  },
+  async addReferral(ref) {
+    return await supa.from('referrals').insert([ref]).select().single();
+  }
+};
+
+// =========================================
+// SECTION 4: SCORING LOGIC
+// =========================================
+const scoring = {
+  calculate(doc, lastVisit = null) {
+    let interest = 0, load = 0, fit = 0, warmth = 0;
+    if (lastVisit && lastVisit.interest) interest = (lastVisit.interest / 5) * 40;
+    const loadMap = { 'Empty': 5, 'Few': 15, 'Steady': 25, 'Packed': 30 };
+    load = loadMap[doc.waiting_room] || 0;
+    const highFit = ['GP','Physician','ENT','Gynae','General Surgeon','Dentist','Maxillofacial','Small Hospital'];
+    if (highFit.includes(doc.specialty)) fit = 20;
+    else if (doc.specialty) fit = 10;
+    if (lastVisit) {
+      if (lastVisit.met_status === 'doctor') warmth += 5;
+      if (lastVisit.referral_likely === 'yes') warmth += 5;
+    }
+    return Math.round(interest + load + fit + warmth);
+  },
+  tier(score) {
+    if (score >= 70) return 'A';
+    if (score >= 40) return 'B';
+    return 'C';
+  },
+  suggestion(doc) {
+    const t = doc.tier;
+    if (t === 'A') return '🔥 Hot. Revisit in 7 days.';
+    if (t === 'B') return '☀️ Warm. Revisit in 15 days.';
+    return '❄️ Cold. Low priority.';
+  }
+};
+
+// =========================================
+// SECTION 5: OFFLINE QUEUE
+// =========================================
+const queue = {
+  key: 'cion_offline_queue',
+  add(item) {
+    const q = this.all();
+    q.push({ ...item, queuedAt: Date.now() });
+    localStorage.setItem(this.key, JSON.stringify(q));
+  },
+  all() {
+    try { return JSON.parse(localStorage.getItem(this.key) || '[]'); } catch { return []; }
+  },
+  async sync() {
+    const items = this.all();
+    if (items.length === 0) return 0;
+    let synced = 0;
+    const failed = [];
+    for (const item of items) {
+      try {
+        if (item.type === 'visit') await supa.from('visits').insert([item.data]);
+        else if (item.type === 'doctor') await supa.from('doctors').insert([item.data]);
+        synced++;
+      } catch (e) { failed.push(item); }
+    }
+    localStorage.setItem(this.key, JSON.stringify(failed));
+    return synced;
+  }
+};
+
+// =========================================
+// SECTION 6: UI COMPONENTS
+// =========================================
+const { useState, useEffect } = React;
+
+function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('cion_user') || 'null'); } catch { return null; }
+  });
+  const [screen, setScreen] = useState('home');
+  const [online, setOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(queue.all().length);
+
+  useEffect(() => {
+    const onOnline = async () => {
+      setOnline(true);
+      const n = await queue.sync();
+      setPendingCount(queue.all().length);
+      if (n > 0) alert('Synced ' + n + ' pending items.');
+    };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  const handleLogin = (rep) => {
+    setCurrentUser(rep);
+    localStorage.setItem('cion_user', JSON.stringify(rep));
+  };
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('cion_user');
+    setScreen('home');
+  };
+
+  if (!currentUser) return <Login onLogin={handleLogin} />;
+  const isAdmin = currentUser.role === 'admin';
+
+  return (
+    <div className="min-h-screen pb-20">
+      <Header user={currentUser} online={online} pendingCount={pendingCount} onLogout={handleLogout} />
+      <main className="p-4 max-w-lg mx-auto">
+        {screen === 'home' && <Home user={currentUser} setScreen={setScreen} />}
+        {screen === 'doctors' && <DoctorList setScreen={setScreen} />}
+        {screen === 'addDoctor' && <AddDoctor user={currentUser} onDone={() => setScreen('doctors')} />}
+        {screen === 'logVisit' && <LogVisit user={currentUser} onDone={() => setScreen('home')} />}
+        {screen === 'learn' && <Learn />}
+        {screen === 'dashboard' && isAdmin && <Dashboard />}
+        {screen === 'referral' && isAdmin && <AddReferral onDone={() => setScreen('dashboard')} />}
+      </main>
+      <BottomNav screen={screen} setScreen={setScreen} isAdmin={isAdmin} />
+    </div>
+  );
+}
+
+function Header({ user, online, pendingCount, onLogout }) {
+  return (
+    <header className="cion-primary text-white p-4 flex justify-between items-center sticky top-0 z-10 card-shadow">
+      <div>
+        <h1 className="font-bold text-lg">CION Connect</h1>
+        <p className="text-xs opacity-80">{user.name} · {user.role}</p>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className={'px-2 py-1 rounded ' + (online ? 'bg-green-500' : 'bg-red-500')}>
+          {online ? '● Online' : '○ Offline'}
+        </span>
+        {pendingCount > 0 && <span className="bg-yellow-500 px-2 py-1 rounded">⏳ {pendingCount}</span>}
+        <button onClick={onLogout} className="underline">Logout</button>
+      </div>
+    </header>
+  );
+}
+
+function Login({ onLogin }) {
+  const [reps, setReps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    db.getReps().then(r => { setReps(r); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, []);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 cion-primary text-white">
+      <h1 className="text-3xl font-bold mb-2">CION Connect</h1>
+      <p className="mb-8 opacity-80">Field Force App</p>
+      {loading ? <p>Loading...</p> :
+       error ? <p className="text-red-300 text-sm">Error: {error}</p> :
+       reps.length === 0 ? <p className="text-yellow-200 text-sm">No users found. Check Supabase setup.</p> :
+       (
+        <div className="w-full max-w-xs space-y-3">
+          <p className="text-sm mb-2">Select your name:</p>
+          {reps.map(r => (
+            <button key={r.id} onClick={() => onLogin(r)}
+              className="w-full bg-white text-purple-900 py-4 rounded-lg font-semibold text-lg shadow">
+              {r.name} <span className="text-xs opacity-60">({r.role})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Home({ user, setScreen }) {
+  const [actions, setActions] = useState([]);
+  const [stats, setStats] = useState({ visits: 0, doctors: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [acts, docs, vis] = await Promise.all([
+        db.getTodayActions(),
+        db.getDoctors(),
+        db.getVisits(user.id, 100)
+      ]);
+      setActions(acts);
+      const thisWeek = vis.filter(v => (Date.now() - new Date(v.visited_at)) < 7 * 24 * 3600 * 1000);
+      setStats({ visits: thisWeek.length, doctors: docs.length });
+      setLoading(false);
+    })();
+  }, [user.id]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white p-4 rounded-lg card-shadow">
+          <p className="text-xs text-gray-500">This Week</p>
+          <p className="text-2xl font-bold cion-primary-text">{stats.visits}</p>
+          <p className="text-xs">visits logged</p>
+        </div>
+        <div className="bg-white p-4 rounded-lg card-shadow">
+          <p className="text-xs text-gray-500">Universe</p>
+          <p className="text-2xl font-bold cion-primary-text">{stats.doctors}</p>
+          <p className="text-xs">doctors tracked</p>
+        </div>
+      </div>
+
+      <button onClick={() => setScreen('logVisit')}
+        className="w-full cion-accent text-white py-5 rounded-xl font-bold text-lg shadow-lg">
+        ➕ Log New Visit
+      </button>
+
+      <div className="bg-white rounded-lg card-shadow p-4">
+        <h2 className="font-bold mb-3 cion-primary-text">🔴 Today's Action List</h2>
+        {loading ? <p className="text-sm text-gray-500">Loading...</p> :
+         actions.length === 0 ? <p className="text-sm text-gray-500">No pending follow-ups. Add doctors and log visits to build your list.</p> :
+         actions.slice(0, 5).map(a => (
+          <div key={a.id} className="border-b py-2 last:border-0">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="font-semibold">{a.name}</p>
+                <p className="text-xs text-gray-500">{a.clinic_name} · {a.zones?.name}</p>
+                <p className="text-xs mt-1">{scoring.suggestion(a)}</p>
+              </div>
+              <span className={'text-xs px-2 py-1 rounded font-bold ' + (
+                a.tier === 'A' ? 'bg-red-100 text-red-700' :
+                a.tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-gray-100 text-gray-700')}>{a.tier || '-'}</span>
+            </div>
+          </div>
+         ))
+        }
+      </div>
+    </div>
+  );
+}
+
+function AddDoctor({ user, onDone }) {
+  const [zones, setZones] = useState([]);
+  const [form, setForm] = useState({
+    name: '', mobile: '', specialty: '', clinic_name: '', zone_id: '',
+    op_fee: '', waiting_room: '', area_class: '',
+    cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
+    refers_to: ''
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { db.getZones().then(setZones); }, []);
+
+  const specialties = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','General Surgeon','Paediatrician','Small Hospital','Large Hospital','Diagnostic Centre','Other'];
+
+  const submit = async () => {
+    if (!form.name || !form.specialty) { alert('Name and Specialty required'); return; }
+    setSaving(true);
+    const payload = {
+      ...form,
+      op_fee: form.op_fee ? parseInt(form.op_fee) : null,
+      zone_id: form.zone_id ? parseInt(form.zone_id) : null,
+      created_by: user.id,
+      score: 0,
+      tier: 'C'
+    };
+    if (!navigator.onLine) {
+      queue.add({ type: 'doctor', data: payload });
+      alert('Saved offline. Will sync when online.');
+      onDone();
+      return;
+    }
+    const { error } = await db.addDoctor(payload);
+    setSaving(false);
+    if (error) { alert('Error: ' + error.message); return; }
+    onDone();
+  };
+
+  const setSvc = (k, v) => setForm({ ...form, cancer_services: { ...form.cancer_services, [k]: v }});
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">Add New Doctor</h2>
+
+      <Field label="Doctor Name *"><input className="input" value={form.name}
+        onChange={e => setForm({...form, name: e.target.value})} /></Field>
+
+      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile}
+        onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
+
+      <Field label="Specialty *"><select className="input" value={form.specialty}
+        onChange={e => setForm({...form, specialty: e.target.value})}>
+        <option value="">Select...</option>
+        {specialties.map(s => <option key={s}>{s}</option>)}
+      </select></Field>
+
+      <Field label="Clinic Name"><input className="input" value={form.clinic_name}
+        onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
+
+      <Field label="Zone"><select className="input" value={form.zone_id}
+        onChange={e => setForm({...form, zone_id: e.target.value})}>
+        <option value="">Select...</option>
+        {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+      </select></Field>
+
+      <Field label="OP Fee (₹)"><input className="input" type="number" value={form.op_fee}
+        onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
+
+      <Field label="Waiting Room">
+        <div className="grid grid-cols-4 gap-1">
+          {['Empty','Few','Steady','Packed'].map(v => (
+            <button key={v} type="button"
+              className={'py-2 rounded text-sm ' + (form.waiting_room === v ? 'cion-primary text-white' : 'bg-gray-200')}
+              onClick={() => setForm({...form, waiting_room: v})}>{v}</button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Area Class">
+        <div className="grid grid-cols-3 gap-1">
+          {['Posh','Mixed','Lower'].map(v => (
+            <button key={v} type="button"
+              className={'py-2 rounded text-sm ' + (form.area_class === v ? 'cion-primary text-white' : 'bg-gray-200')}
+              onClick={() => setForm({...form, area_class: v})}>{v}</button>
+          ))}
+        </div>
+      </Field>
+
+      <div className="bg-white p-3 rounded card-shadow">
+        <p className="font-semibold mb-2 text-sm">Cancer Service Map</p>
+        {[
+          ['biopsy','Biopsy'],['screening','Screening'],['surgery','Complex Surgery'],
+          ['chemo','Chemotherapy'],['radiation','Radiation'],['supportive','Supportive Care']
+        ].map(([k, label]) => (
+          <div key={k} className="flex items-center justify-between py-1">
+            <span className="text-sm">{label}</span>
+            <div className="flex gap-1">
+              {[['in','In'],['out','Out'],['na','N/A']].map(([v,lbl]) => (
+                <button key={v} type="button"
+                  className={'text-xs px-2 py-1 rounded ' + (form.cancer_services[k] === v ? 'cion-primary text-white' : 'bg-gray-200')}
+                  onClick={() => setSvc(k, v)}>{lbl}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Field label="Refers To (who/where)"><input className="input" value={form.refers_to}
+        onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
+
+      <button onClick={submit} disabled={saving}
+        className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
+        {saving ? 'Saving...' : 'Save Doctor'}
+      </button>
+    </div>
+  );
+}
+
+function DoctorList({ setScreen }) {
+  const [docs, setDocs] = useState([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { db.getDoctors().then(d => { setDocs(d); setLoading(false); }); }, []);
+
+  const filtered = docs.filter(d =>
+    !search || d.name.toLowerCase().includes(search.toLowerCase()) ||
+    (d.clinic_name || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input className="input flex-1" placeholder="Search doctors..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+        <button onClick={() => setScreen('addDoctor')}
+          className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
+      </div>
+      {loading ? <p>Loading...</p> :
+       filtered.length === 0 ? <p className="text-gray-500 text-center py-8">No doctors yet. Tap "+ Add"</p> :
+       filtered.map(d => (
+        <div key={d.id} className="bg-white p-3 rounded-lg card-shadow">
+          <div className="flex justify-between">
+            <div>
+              <p className="font-semibold">{d.name}</p>
+              <p className="text-xs text-gray-500">{d.specialty} · {d.clinic_name}</p>
+              <p className="text-xs">{d.zones?.name} · ₹{d.op_fee || '-'}</p>
+            </div>
+            <div className="text-right">
+              <span className={'text-xs px-2 py-1 rounded font-bold ' + (
+                d.tier === 'A' ? 'bg-red-100 text-red-700' :
+                d.tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-gray-100 text-gray-700')}>{d.tier || 'C'}</span>
+              <p className="text-xs mt-1">Score: {d.score}</p>
+            </div>
+          </div>
+        </div>
+       ))
+      }
+    </div>
+  );
+}
+
+function LogVisit({ user, onDone }) {
+  const [doctors, setDoctors] = useState([]);
+  const [doctorId, setDoctorId] = useState('');
+  const [form, setForm] = useState({
+    met_status: '', time_spent: '', interest: 3, referral_likely: '',
+    outcome: '', notes: '', stump_question: '', next_followup: ''
+  });
+  const [gps, setGps] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    db.getDoctors().then(setDoctors);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        p => setGps({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => setGps(null), { timeout: 5000 }
+      );
+    }
+  }, []);
+
+  const submit = async () => {
+    if (!doctorId) { alert('Select a doctor'); return; }
+    if (!form.met_status) { alert('Mark met status'); return; }
+    setSaving(true);
+
+    const visit = {
+      doctor_id: doctorId, rep_id: user.id, visit_type: 'followup',
+      ...form,
+      interest: parseInt(form.interest),
+      next_followup: form.next_followup || null,
+      gps_lat: gps?.lat, gps_lng: gps?.lng
+    };
+
+    if (!navigator.onLine) {
+      queue.add({ type: 'visit', data: visit });
+      alert('Saved offline. Will sync when online.');
+      onDone();
+      return;
+    }
+
+    const { error } = await db.addVisit(visit);
+    if (error) { alert('Error: ' + error.message); setSaving(false); return; }
+
+    const doc = doctors.find(d => d.id === doctorId);
+    if (doc) {
+      const newScore = scoring.calculate(doc, visit);
+      const newTier = scoring.tier(newScore);
+      await db.updateDoctor(doctorId, { score: newScore, tier: newTier, next_followup: visit.next_followup });
+    }
+
+    setSaving(false);
+    alert('Visit logged ✓');
+    onDone();
+  };
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">Log Visit</h2>
+
+      <Field label="Doctor *">
+        <select className="input" value={doctorId} onChange={e => setDoctorId(e.target.value)}>
+          <option value="">Select doctor...</option>
+          {doctors.map(d => <option key={d.id} value={d.id}>{d.name} — {d.clinic_name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="Met status *">
+        <div className="grid grid-cols-3 gap-1">
+          {[['doctor','Doctor'],['staff','Staff'],['not_met','Not met']].map(([v,l]) => (
+            <button key={v} type="button"
+              className={'py-2 rounded text-sm ' + (form.met_status === v ? 'cion-primary text-white' : 'bg-gray-200')}
+              onClick={() => setForm({...form, met_status: v})}>{l}</button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Time spent">
+        <div className="grid grid-cols-3 gap-1">
+          {['2min','5min','10min+'].map(v => (
+            <button key={v} type="button"
+              className={'py-2 rounded text-sm ' + (form.time_spent === v ? 'cion-primary text-white' : 'bg-gray-200')}
+              onClick={() => setForm({...form, time_spent: v})}>{v}</button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label={'Interest: ' + form.interest + '/5'}>
+        <input type="range" min="1" max="5" value={form.interest} className="w-full"
+          onChange={e => setForm({...form, interest: e.target.value})} />
+      </Field>
+
+      <Field label="Referral likely?">
+        <div className="grid grid-cols-3 gap-1">
+          {[['yes','Yes'],['maybe','Maybe'],['no','No']].map(([v,l]) => (
+            <button key={v} type="button"
+              className={'py-2 rounded text-sm ' + (form.referral_likely === v ? 'cion-primary text-white' : 'bg-gray-200')}
+              onClick={() => setForm({...form, referral_likely: v})}>{l}</button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Outcome"><input className="input" value={form.outcome}
+        onChange={e => setForm({...form, outcome: e.target.value})} /></Field>
+
+      <Field label="Stump Question (what you couldn't answer)">
+        <textarea className="input" rows="2" value={form.stump_question}
+          onChange={e => setForm({...form, stump_question: e.target.value})} />
+      </Field>
+
+      <Field label="Notes"><textarea className="input" rows="2" value={form.notes}
+        onChange={e => setForm({...form, notes: e.target.value})} /></Field>
+
+      <Field label="Next follow-up date">
+        <input type="date" className="input" value={form.next_followup}
+          min={new Date().toISOString().split('T')[0]}
+          onChange={e => setForm({...form, next_followup: e.target.value})} />
+      </Field>
+
+      {gps && <p className="text-xs text-gray-500">📍 GPS captured</p>}
+
+      <button onClick={submit} disabled={saving}
+        className="w-full cion-accent text-white py-4 rounded-lg font-bold text-lg disabled:opacity-50">
+        {saving ? 'Saving...' : 'Submit Visit ✓'}
+      </button>
+    </div>
+  );
+}
+
+function Learn() {
+  const [cards, setCards] = useState([]);
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  useEffect(() => { db.getCards().then(setCards); }, []);
+
+  if (cards.length === 0) return <p>Loading cards...</p>;
+  const card = cards[idx];
+
+  return (
+    <div className="space-y-4">
+      <h2 className="font-bold text-lg cion-primary-text">Cheat Sheet</h2>
+      <p className="text-xs text-gray-500">{idx + 1} / {cards.length} · {card.category}</p>
+      <div onClick={() => setFlipped(!flipped)}
+        className="bg-white p-6 rounded-lg card-shadow min-h-40 flex items-center justify-center cursor-pointer">
+        <p className="text-center text-lg font-medium">{flipped ? card.back : card.front}</p>
+      </div>
+      <p className="text-center text-xs text-gray-500">Tap card to flip</p>
+      <div className="flex gap-2">
+        <button onClick={() => { setIdx(Math.max(0, idx-1)); setFlipped(false); }}
+          className="flex-1 bg-gray-300 py-3 rounded font-bold">← Prev</button>
+        <button onClick={() => { setIdx(Math.min(cards.length-1, idx+1)); setFlipped(false); }}
+          className="flex-1 cion-primary text-white py-3 rounded font-bold">Next →</button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard() {
+  const [stats, setStats] = useState(null);
+  useEffect(() => { db.getDashboardStats().then(setStats); }, []);
+  if (!stats) return <p>Loading...</p>;
+
+  const byRep = {};
+  stats.reps.forEach(r => byRep[r.id] = { name: r.name, visits: 0, doctorsMet: new Set() });
+  stats.visits.forEach(v => {
+    if (byRep[v.rep_id]) {
+      byRep[v.rep_id].visits++;
+      if (v.met_status === 'doctor') byRep[v.rep_id].doctorsMet.add(v.doctor_id);
+    }
+  });
+
+  const tierCount = { A: 0, B: 0, C: 0 };
+  stats.doctors.forEach(d => { if (d.tier) tierCount[d.tier]++; });
+
+  return (
+    <div className="space-y-4">
+      <h2 className="font-bold text-lg cion-primary-text">Manager Dashboard</h2>
+
+      <div className="grid grid-cols-3 gap-2">
+        <StatBox label="Doctors" val={stats.doctors.length} />
+        <StatBox label="Visits" val={stats.visits.length} />
+        <StatBox label="Reps" val={stats.reps.length} />
+      </div>
+
+      <div className="bg-white p-4 rounded-lg card-shadow">
+        <h3 className="font-semibold mb-2">Rep Performance</h3>
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-gray-500">
+            <th>Rep</th><th>Visits</th><th>Doctors Met</th>
+          </tr></thead>
+          <tbody>
+          {Object.values(byRep).map(r => (
+            <tr key={r.name} className="border-t">
+              <td className="py-2">{r.name}</td>
+              <td>{r.visits}</td>
+              <td>{r.doctorsMet.size}</td>
+            </tr>
+          ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-white p-4 rounded-lg card-shadow">
+        <h3 className="font-semibold mb-2">Doctor Tiers</h3>
+        <div className="flex gap-3">
+          <div className="flex-1 bg-red-100 p-3 rounded text-center">
+            <p className="text-xs text-red-700">Tier A</p>
+            <p className="text-2xl font-bold text-red-700">{tierCount.A}</p>
+          </div>
+          <div className="flex-1 bg-yellow-100 p-3 rounded text-center">
+            <p className="text-xs text-yellow-700">Tier B</p>
+            <p className="text-2xl font-bold text-yellow-700">{tierCount.B}</p>
+          </div>
+          <div className="flex-1 bg-gray-100 p-3 rounded text-center">
+            <p className="text-xs text-gray-700">Tier C</p>
+            <p className="text-2xl font-bold text-gray-700">{tierCount.C}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddReferral({ onDone }) {
+  const [doctors, setDoctors] = useState([]);
+  const [reps, setReps] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [form, setForm] = useState({ patient_name:'', referred_by_doctor:'', influenced_by_rep:'', zone_id:'', notes:'' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    db.getDoctors().then(setDoctors);
+    db.getReps().then(r => setReps(r.filter(x => x.role === 'rep')));
+    db.getZones().then(setZones);
+  }, []);
+
+  const submit = async () => {
+    if (!form.patient_name) { alert('Patient name required'); return; }
+    setSaving(true);
+    const payload = {
+      ...form,
+      zone_id: form.zone_id ? parseInt(form.zone_id) : null,
+      referred_by_doctor: form.referred_by_doctor || null,
+      influenced_by_rep: form.influenced_by_rep || null
+    };
+    const { error } = await db.addReferral(payload);
+    setSaving(false);
+    if (error) { alert('Error: ' + error.message); return; }
+    alert('Referral logged ✓');
+    onDone();
+  };
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">Log Referral</h2>
+      <Field label="Patient Name *"><input className="input" value={form.patient_name}
+        onChange={e => setForm({...form, patient_name: e.target.value})} /></Field>
+      <Field label="Referred by Doctor">
+        <select className="input" value={form.referred_by_doctor}
+          onChange={e => setForm({...form, referred_by_doctor: e.target.value})}>
+          <option value="">None</option>
+          {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Influenced by Rep">
+        <select className="input" value={form.influenced_by_rep}
+          onChange={e => setForm({...form, influenced_by_rep: e.target.value})}>
+          <option value="">None</option>
+          {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Zone">
+        <select className="input" value={form.zone_id}
+          onChange={e => setForm({...form, zone_id: e.target.value})}>
+          <option value="">None</option>
+          {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Notes"><textarea className="input" rows="2" value={form.notes}
+        onChange={e => setForm({...form, notes: e.target.value})} /></Field>
+      <button onClick={submit} disabled={saving}
+        className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">
+        {saving ? 'Saving...' : 'Save Referral'}
+      </button>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-gray-600 mb-1 block">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function StatBox({ label, val }) {
+  return (
+    <div className="bg-white p-3 rounded-lg card-shadow text-center">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-2xl font-bold cion-primary-text">{val}</p>
+    </div>
+  );
+}
+
+function BottomNav({ screen, setScreen, isAdmin }) {
+  const items = [
+    ['home', '🏠', 'Home'],
+    ['doctors', '👨‍⚕️', 'Doctors'],
+    ['learn', '🎓', 'Learn'],
+  ];
+  if (isAdmin) {
+    items.push(['dashboard', '📊', 'Dash']);
+    items.push(['referral', '🎯', 'Refer']);
+  }
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2 card-shadow">
+      {items.map(([key, icon, label]) => (
+        <button key={key} onClick={() => setScreen(key)}
+          className={'flex flex-col items-center p-1 ' + (screen === key ? 'cion-primary-text' : 'text-gray-500')}>
+          <span className="text-xl">{icon}</span>
+          <span className="text-xs">{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
