@@ -20,6 +20,9 @@
   input, select, textarea { font-size: 16px; }
   .card-shadow { box-shadow: 0 2px 8px rgba(75, 30, 107, 0.08); }
   .input { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; background:white; }
+  .chip { padding: 6px 10px; border-radius: 16px; font-size: 12px; cursor: pointer; user-select: none; }
+  .chip-on { background: #4B1E6B; color: white; }
+  .chip-off { background: #e5e7eb; color: #374151; }
 </style>
 </head>
 <body>
@@ -31,6 +34,7 @@
 // =========================================
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
+const APP_VERSION = '2.3.0';
 
 // =========================================
 // SECTION 2: SUPABASE CLIENT
@@ -38,12 +42,41 @@ const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // =========================================
-// SECTION 3: DB HELPERS
+// SECTION 3: CONSTANTS
+// =========================================
+const SPECIALTIES = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','General Surgeon','Paediatrician','Small Hospital','Large Hospital','Diagnostic Centre','Other'];
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const HOURS = ['9-10 AM','10-11 AM','11-12 PM','12-1 PM','1-2 PM','2-3 PM','3-4 PM','4-5 PM','5-6 PM','6-7 PM','7-8 PM','8-9 PM'];
+const TIER_GUIDANCE = {
+  A: { emoji: '🔥', label: 'Hot Lead', advice: 'Meet 3–4 times a month' },
+  B: { emoji: '☀️', label: 'Warm', advice: 'Meet 1–2 times a month' },
+  C: { emoji: '❄️', label: 'Cold', advice: 'Meet once a month' }
+};
+const LEARNING_CATEGORIES = [
+  { key: 'basics', name: 'Cancer Basics', icon: '📚' },
+  { key: 'types', name: 'Cancer Types', icon: '🧬' },
+  { key: 'treatments', name: 'Cancer Treatments', icon: '💊' },
+  { key: 'cion_services', name: 'CION Services', icon: '🏥' },
+  { key: 'cion_doctors', name: 'CION Doctors', icon: '👨‍⚕️' },
+  { key: 'biopsy', name: 'Types of Biopsies', icon: '🔬' },
+  { key: 'chemo', name: 'Chemotherapy Types', icon: '💉' },
+  { key: 'surgery', name: 'Cancer Surgeries', icon: '⚕️' },
+  { key: 'radiation', name: 'Radiation Types', icon: '☢️' },
+  { key: 'protocols', name: 'Cancer Protocols', icon: '📋' },
+  { key: 'network', name: 'CION Network', icon: '🗺️' }
+];
+
+// =========================================
+// SECTION 4: DB HELPERS
 // =========================================
 const db = {
   async getReps() {
     const { data } = await supa.from('reps').select('*').eq('active', true).order('name');
     return data || [];
+  },
+  async findRepByName(name) {
+    const { data } = await supa.from('reps').select('*').ilike('name', name.trim()).eq('active', true).maybeSingle();
+    return data;
   },
   async getZones() {
     const { data } = await supa.from('zones').select('*').order('name');
@@ -59,6 +92,27 @@ const db = {
   async updateDoctor(id, updates) {
     return await supa.from('doctors').update(updates).eq('id', id);
   },
+  async addPendingEdit(doctorId, repId, changes) {
+    return await supa.from('pending_edits').insert([{ doctor_id: doctorId, rep_id: repId, changes }]);
+  },
+  async getPendingEdits() {
+    const { data } = await supa.from('pending_edits')
+      .select('*, doctors(name), reps(name)')
+      .eq('status','pending')
+      .order('created_at');
+    return data || [];
+  },
+  async approveEdit(editId, doctorId, changes, reviewerId) {
+    await supa.from('doctors').update(changes).eq('id', doctorId);
+    return await supa.from('pending_edits').update({
+      status: 'approved', reviewed_by: reviewerId, reviewed_at: new Date().toISOString()
+    }).eq('id', editId);
+  },
+  async rejectEdit(editId, reviewerId, reason) {
+    return await supa.from('pending_edits').update({
+      status: 'rejected', reviewed_by: reviewerId, reviewed_at: new Date().toISOString(), reject_reason: reason
+    }).eq('id', editId);
+  },
   async getVisits(repId, limit = 50) {
     const { data } = await supa.from('visits')
       .select('*, doctors(name, clinic_name)')
@@ -69,10 +123,6 @@ const db = {
   },
   async addVisit(visit) {
     return await supa.from('visits').insert([visit]).select().single();
-  },
-  async getCards() {
-    const { data } = await supa.from('cards').select('*').eq('active', true);
-    return data || [];
   },
   async getTodayActions() {
     const today = new Date().toISOString().split('T')[0];
@@ -87,15 +137,37 @@ const db = {
     const { data: visits } = await supa.from('visits').select('rep_id, doctor_id, interest, visited_at, met_status');
     const { data: reps } = await supa.from('reps').select('*').eq('role', 'rep');
     const { data: doctors } = await supa.from('doctors').select('tier, zone_id, zones(name)');
-    return { visits: visits || [], reps: reps || [], doctors: doctors || [] };
+    const { data: pendingCount } = await supa.from('pending_edits').select('id').eq('status','pending');
+    const { data: referrals } = await supa.from('referrals').select('influenced_by_rep, referred_by_doctor');
+    return { visits: visits || [], reps: reps || [], doctors: doctors || [], pendingEdits: pendingCount?.length || 0, referrals: referrals || [] };
   },
   async addReferral(ref) {
     return await supa.from('referrals').insert([ref]).select().single();
+  },
+  async getLessons() {
+    const { data } = await supa.from('lessons').select('*').eq('active', true).order('display_order');
+    return data || [];
+  },
+  async getQuizQuestions(lessonId) {
+    const { data } = await supa.from('quiz_questions').select('*').eq('lesson_id', lessonId).eq('active', true);
+    return data || [];
+  },
+  async logQuizAttempt(att) {
+    return await supa.from('quiz_attempts').insert([att]);
+  },
+  async getDailyLesson() {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supa.from('daily_lessons').select('*, lessons(*)').eq('scheduled_date', today).maybeSingle();
+    if (data) return data.lessons;
+    // fallback: pick a random active lesson
+    const { data: all } = await supa.from('lessons').select('*').eq('active', true);
+    if (all && all.length) return all[Math.floor(Math.random() * all.length)];
+    return null;
   }
 };
 
 // =========================================
-// SECTION 4: SCORING LOGIC
+// SECTION 5: SCORING
 // =========================================
 const scoring = {
   calculate(doc, lastVisit = null) {
@@ -116,17 +188,11 @@ const scoring = {
     if (score >= 70) return 'A';
     if (score >= 40) return 'B';
     return 'C';
-  },
-  suggestion(doc) {
-    const t = doc.tier;
-    if (t === 'A') return '🔥 Hot. Revisit in 7 days.';
-    if (t === 'B') return '☀️ Warm. Revisit in 15 days.';
-    return '❄️ Cold. Low priority.';
   }
 };
 
 // =========================================
-// SECTION 5: OFFLINE QUEUE
+// SECTION 6: OFFLINE QUEUE
 // =========================================
 const queue = {
   key: 'cion_offline_queue',
@@ -147,6 +213,7 @@ const queue = {
       try {
         if (item.type === 'visit') await supa.from('visits').insert([item.data]);
         else if (item.type === 'doctor') await supa.from('doctors').insert([item.data]);
+        else if (item.type === 'pending_edit') await supa.from('pending_edits').insert([item.data]);
         synced++;
       } catch (e) { failed.push(item); }
     }
@@ -156,7 +223,7 @@ const queue = {
 };
 
 // =========================================
-// SECTION 6: UI COMPONENTS
+// SECTION 7: APP
 // =========================================
 const { useState, useEffect } = React;
 
@@ -165,6 +232,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('cion_user') || 'null'); } catch { return null; }
   });
   const [screen, setScreen] = useState('home');
+  const [screenParams, setScreenParams] = useState({});
   const [online, setOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(queue.all().length);
 
@@ -187,12 +255,15 @@ function App() {
   const handleLogin = (rep) => {
     setCurrentUser(rep);
     localStorage.setItem('cion_user', JSON.stringify(rep));
+    localStorage.setItem('cion_last_name', rep.name);
   };
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('cion_user');
     setScreen('home');
   };
+
+  const goto = (s, params = {}) => { setScreen(s); setScreenParams(params); };
 
   if (!currentUser) return <Login onLogin={handleLogin} />;
   const isAdmin = currentUser.role === 'admin';
@@ -201,15 +272,19 @@ function App() {
     <div className="min-h-screen pb-20">
       <Header user={currentUser} online={online} pendingCount={pendingCount} onLogout={handleLogout} />
       <main className="p-4 max-w-lg mx-auto">
-        {screen === 'home' && <Home user={currentUser} setScreen={setScreen} />}
-        {screen === 'doctors' && <DoctorList setScreen={setScreen} />}
-        {screen === 'addDoctor' && <AddDoctor user={currentUser} onDone={() => setScreen('doctors')} />}
-        {screen === 'logVisit' && <LogVisit user={currentUser} onDone={() => setScreen('home')} />}
-        {screen === 'learn' && <Learn />}
-        {screen === 'dashboard' && isAdmin && <Dashboard />}
-        {screen === 'referral' && isAdmin && <AddReferral onDone={() => setScreen('dashboard')} />}
+        {screen === 'home' && <Home user={currentUser} goto={goto} />}
+        {screen === 'doctors' && <DoctorList user={currentUser} goto={goto} />}
+        {screen === 'addDoctor' && <DoctorForm user={currentUser} goto={goto} />}
+        {screen === 'editDoctor' && <DoctorForm user={currentUser} goto={goto} doctorId={screenParams.doctorId} />}
+        {screen === 'logVisit' && <LogVisit user={currentUser} goto={goto} preDoctorId={screenParams.doctorId} />}
+        {screen === 'learn' && <Learn user={currentUser} />}
+        {screen === 'lessonView' && <LessonView lessonId={screenParams.lessonId} user={currentUser} goto={goto} />}
+        {screen === 'quiz' && <Quiz lessonId={screenParams.lessonId} user={currentUser} goto={goto} />}
+        {screen === 'dashboard' && isAdmin && <Dashboard goto={goto} />}
+        {screen === 'pendingEdits' && isAdmin && <PendingEditsQueue user={currentUser} goto={goto} />}
+        {screen === 'addReferral' && isAdmin && <AddReferral goto={goto} />}
       </main>
-      <BottomNav screen={screen} setScreen={setScreen} isAdmin={isAdmin} />
+      <BottomNav screen={screen} goto={goto} isAdmin={isAdmin} />
     </div>
   );
 }
@@ -233,52 +308,64 @@ function Header({ user, online, pendingCount, onLogout }) {
 }
 
 function Login({ onLogin }) {
-  const [reps, setReps] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [name, setName] = useState(localStorage.getItem('cion_last_name') || '');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    db.getReps().then(r => { setReps(r); setLoading(false); })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, []);
+  const submit = async () => {
+    if (!name.trim()) { setError('Enter your name'); return; }
+    setLoading(true); setError('');
+    const rep = await db.findRepByName(name);
+    setLoading(false);
+    if (!rep) { setError('Name not found. Contact admin.'); return; }
+    onLogin(rep);
+  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 cion-primary text-white">
       <h1 className="text-3xl font-bold mb-2">CION Connect</h1>
       <p className="mb-8 opacity-80">Field Force App</p>
-      {loading ? <p>Loading...</p> :
-       error ? <p className="text-red-300 text-sm">Error: {error}</p> :
-       reps.length === 0 ? <p className="text-yellow-200 text-sm">No users found. Check Supabase setup.</p> :
-       (
-        <div className="w-full max-w-xs space-y-3">
-          <p className="text-sm mb-2">Select your name:</p>
-          {reps.map(r => (
-            <button key={r.id} onClick={() => onLogin(r)}
-              className="w-full bg-white text-purple-900 py-4 rounded-lg font-semibold text-lg shadow">
-              {r.name} <span className="text-xs opacity-60">({r.role})</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="w-full max-w-xs space-y-3">
+        <p className="text-sm">Type your name to login:</p>
+        <input className="input text-gray-800" placeholder="e.g. Sandeep"
+          value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()} />
+        {error && <p className="text-red-300 text-xs">{error}</p>}
+        <button onClick={submit} disabled={loading}
+          className="w-full bg-white text-purple-900 py-3 rounded-lg font-bold disabled:opacity-50">
+          {loading ? 'Checking...' : 'Login'}
+        </button>
+      </div>
     </div>
   );
 }
 
-function Home({ user, setScreen }) {
+function TierBadge({ tier }) {
+  if (!tier) tier = 'C';
+  const cls = tier === 'A' ? 'bg-red-100 text-red-700' :
+              tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
+              'bg-gray-100 text-gray-700';
+  return <span className={'text-xs px-2 py-1 rounded font-bold ' + cls}>{TIER_GUIDANCE[tier].emoji} {tier}</span>;
+}
+
+function Home({ user, goto }) {
   const [actions, setActions] = useState([]);
   const [stats, setStats] = useState({ visits: 0, doctors: 0 });
+  const [dailyLesson, setDailyLesson] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [acts, docs, vis] = await Promise.all([
+      const [acts, docs, vis, lesson] = await Promise.all([
         db.getTodayActions(),
         db.getDoctors(),
-        db.getVisits(user.id, 100)
+        db.getVisits(user.id, 100),
+        db.getDailyLesson()
       ]);
       setActions(acts);
       const thisWeek = vis.filter(v => (Date.now() - new Date(v.visited_at)) < 7 * 24 * 3600 * 1000);
       setStats({ visits: thisWeek.length, doctors: docs.length });
+      setDailyLesson(lesson);
       setLoading(false);
     })();
   }, [user.id]);
@@ -298,27 +385,37 @@ function Home({ user, setScreen }) {
         </div>
       </div>
 
-      <button onClick={() => setScreen('logVisit')}
+      <button onClick={() => goto('logVisit')}
         className="w-full cion-accent text-white py-5 rounded-xl font-bold text-lg shadow-lg">
         ➕ Log New Visit
       </button>
 
+      {dailyLesson && (
+        <div onClick={() => goto('lessonView', { lessonId: dailyLesson.id })}
+          className="bg-purple-50 border-l-4 border-purple-700 p-4 rounded cursor-pointer">
+          <p className="text-xs font-semibold text-purple-700">📚 TODAY'S LESSON</p>
+          <p className="font-bold mt-1">{dailyLesson.title}</p>
+          <p className="text-xs text-gray-600 mt-1">{dailyLesson.category} · Tap to read + take quiz</p>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg card-shadow p-4">
-        <h2 className="font-bold mb-3 cion-primary-text">🔴 Today's Action List</h2>
+        <h2 className="font-bold mb-2 cion-primary-text">🔴 Today's Action List</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          🔥 Tier A: 3–4 visits/month · ☀️ B: 1–2/month · ❄️ C: 1/month
+        </p>
         {loading ? <p className="text-sm text-gray-500">Loading...</p> :
          actions.length === 0 ? <p className="text-sm text-gray-500">No pending follow-ups. Add doctors and log visits to build your list.</p> :
          actions.slice(0, 5).map(a => (
-          <div key={a.id} className="border-b py-2 last:border-0">
+          <div key={a.id} onClick={() => goto('logVisit', { doctorId: a.id })}
+            className="border-b py-2 last:border-0 cursor-pointer">
             <div className="flex justify-between items-start">
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold">{a.name}</p>
                 <p className="text-xs text-gray-500">{a.clinic_name} · {a.zones?.name}</p>
-                <p className="text-xs mt-1">{scoring.suggestion(a)}</p>
+                <p className="text-xs mt-1 text-gray-600">{TIER_GUIDANCE[a.tier || 'C'].advice}</p>
               </div>
-              <span className={'text-xs px-2 py-1 rounded font-bold ' + (
-                a.tier === 'A' ? 'bg-red-100 text-red-700' :
-                a.tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
-                'bg-gray-100 text-gray-700')}>{a.tier || '-'}</span>
+              <TierBadge tier={a.tier} />
             </div>
           </div>
          ))
@@ -328,124 +425,7 @@ function Home({ user, setScreen }) {
   );
 }
 
-function AddDoctor({ user, onDone }) {
-  const [zones, setZones] = useState([]);
-  const [form, setForm] = useState({
-    name: '', mobile: '', specialty: '', clinic_name: '', zone_id: '',
-    op_fee: '', waiting_room: '', area_class: '',
-    cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
-    refers_to: ''
-  });
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { db.getZones().then(setZones); }, []);
-
-  const specialties = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','General Surgeon','Paediatrician','Small Hospital','Large Hospital','Diagnostic Centre','Other'];
-
-  const submit = async () => {
-    if (!form.name || !form.specialty) { alert('Name and Specialty required'); return; }
-    setSaving(true);
-    const payload = {
-      ...form,
-      op_fee: form.op_fee ? parseInt(form.op_fee) : null,
-      zone_id: form.zone_id ? parseInt(form.zone_id) : null,
-      created_by: user.id,
-      score: 0,
-      tier: 'C'
-    };
-    if (!navigator.onLine) {
-      queue.add({ type: 'doctor', data: payload });
-      alert('Saved offline. Will sync when online.');
-      onDone();
-      return;
-    }
-    const { error } = await db.addDoctor(payload);
-    setSaving(false);
-    if (error) { alert('Error: ' + error.message); return; }
-    onDone();
-  };
-
-  const setSvc = (k, v) => setForm({ ...form, cancer_services: { ...form.cancer_services, [k]: v }});
-
-  return (
-    <div className="space-y-3">
-      <h2 className="font-bold text-lg cion-primary-text">Add New Doctor</h2>
-
-      <Field label="Doctor Name *"><input className="input" value={form.name}
-        onChange={e => setForm({...form, name: e.target.value})} /></Field>
-
-      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile}
-        onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
-
-      <Field label="Specialty *"><select className="input" value={form.specialty}
-        onChange={e => setForm({...form, specialty: e.target.value})}>
-        <option value="">Select...</option>
-        {specialties.map(s => <option key={s}>{s}</option>)}
-      </select></Field>
-
-      <Field label="Clinic Name"><input className="input" value={form.clinic_name}
-        onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
-
-      <Field label="Zone"><select className="input" value={form.zone_id}
-        onChange={e => setForm({...form, zone_id: e.target.value})}>
-        <option value="">Select...</option>
-        {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
-      </select></Field>
-
-      <Field label="OP Fee (₹)"><input className="input" type="number" value={form.op_fee}
-        onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
-
-      <Field label="Waiting Room">
-        <div className="grid grid-cols-4 gap-1">
-          {['Empty','Few','Steady','Packed'].map(v => (
-            <button key={v} type="button"
-              className={'py-2 rounded text-sm ' + (form.waiting_room === v ? 'cion-primary text-white' : 'bg-gray-200')}
-              onClick={() => setForm({...form, waiting_room: v})}>{v}</button>
-          ))}
-        </div>
-      </Field>
-
-      <Field label="Area Class">
-        <div className="grid grid-cols-3 gap-1">
-          {['Posh','Mixed','Lower'].map(v => (
-            <button key={v} type="button"
-              className={'py-2 rounded text-sm ' + (form.area_class === v ? 'cion-primary text-white' : 'bg-gray-200')}
-              onClick={() => setForm({...form, area_class: v})}>{v}</button>
-          ))}
-        </div>
-      </Field>
-
-      <div className="bg-white p-3 rounded card-shadow">
-        <p className="font-semibold mb-2 text-sm">Cancer Service Map</p>
-        {[
-          ['biopsy','Biopsy'],['screening','Screening'],['surgery','Complex Surgery'],
-          ['chemo','Chemotherapy'],['radiation','Radiation'],['supportive','Supportive Care']
-        ].map(([k, label]) => (
-          <div key={k} className="flex items-center justify-between py-1">
-            <span className="text-sm">{label}</span>
-            <div className="flex gap-1">
-              {[['in','In'],['out','Out'],['na','N/A']].map(([v,lbl]) => (
-                <button key={v} type="button"
-                  className={'text-xs px-2 py-1 rounded ' + (form.cancer_services[k] === v ? 'cion-primary text-white' : 'bg-gray-200')}
-                  onClick={() => setSvc(k, v)}>{lbl}</button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <Field label="Refers To (who/where)"><input className="input" value={form.refers_to}
-        onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
-
-      <button onClick={submit} disabled={saving}
-        className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
-        {saving ? 'Saving...' : 'Save Doctor'}
-      </button>
-    </div>
-  );
-}
-
-function DoctorList({ setScreen }) {
+function DoctorList({ user, goto }) {
   const [docs, setDocs] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -461,25 +441,28 @@ function DoctorList({ setScreen }) {
       <div className="flex gap-2">
         <input className="input flex-1" placeholder="Search doctors..."
           value={search} onChange={e => setSearch(e.target.value)} />
-        <button onClick={() => setScreen('addDoctor')}
+        <button onClick={() => goto('addDoctor')}
           className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
       </div>
+      <p className="text-xs text-gray-500">
+        🔥 Tier A: meet 3–4×/month · ☀️ B: 1–2×/month · ❄️ C: 1×/month
+      </p>
       {loading ? <p>Loading...</p> :
        filtered.length === 0 ? <p className="text-gray-500 text-center py-8">No doctors yet. Tap "+ Add"</p> :
        filtered.map(d => (
         <div key={d.id} className="bg-white p-3 rounded-lg card-shadow">
           <div className="flex justify-between">
-            <div>
+            <div className="flex-1">
               <p className="font-semibold">{d.name}</p>
               <p className="text-xs text-gray-500">{d.specialty} · {d.clinic_name}</p>
               <p className="text-xs">{d.zones?.name} · ₹{d.op_fee || '-'}</p>
+              <p className="text-xs text-gray-600 mt-1">{TIER_GUIDANCE[d.tier || 'C'].advice}</p>
             </div>
-            <div className="text-right">
-              <span className={'text-xs px-2 py-1 rounded font-bold ' + (
-                d.tier === 'A' ? 'bg-red-100 text-red-700' :
-                d.tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
-                'bg-gray-100 text-gray-700')}>{d.tier || 'C'}</span>
-              <p className="text-xs mt-1">Score: {d.score}</p>
+            <div className="text-right space-y-1">
+              <TierBadge tier={d.tier} />
+              <p className="text-xs">Score: {d.score}</p>
+              <button onClick={() => goto('editDoctor', { doctorId: d.id })}
+                className="text-xs text-purple-700 underline">Edit</button>
             </div>
           </div>
         </div>
@@ -489,12 +472,216 @@ function DoctorList({ setScreen }) {
   );
 }
 
-function LogVisit({ user, onDone }) {
+function ChipGroup({ options, value, onChange, multi = false }) {
+  const arr = multi ? (value || []) : value;
+  const isOn = (o) => multi ? arr.includes(o) : arr === o;
+  const toggle = (o) => {
+    if (multi) {
+      const next = arr.includes(o) ? arr.filter(x => x !== o) : [...arr, o];
+      onChange(next);
+    } else onChange(o);
+  };
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map(o => (
+        <span key={o} className={'chip ' + (isOn(o) ? 'chip-on' : 'chip-off')} onClick={() => toggle(o)}>{o}</span>
+      ))}
+    </div>
+  );
+}
+
+function DoctorForm({ user, goto, doctorId = null }) {
+  const isEdit = !!doctorId;
+  const isAdmin = user.role === 'admin';
+  const [zones, setZones] = useState([]);
+  const [original, setOriginal] = useState(null);
+  const [form, setForm] = useState({
+    name: '', mobile: '', specialty: '', clinic_name: '', zone_id: '',
+    op_fee: '', waiting_room: '', area_class: '',
+    cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
+    refers_to: '',
+    insurance_accepted: false, aarogyasri: false,
+    visit_days: [], visit_hours: []
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    db.getZones().then(setZones);
+    if (isEdit) {
+      db.getDoctors().then(docs => {
+        const d = docs.find(x => x.id === doctorId);
+        if (d) {
+          setOriginal(d);
+          setForm({
+            name: d.name || '', mobile: d.mobile || '', specialty: d.specialty || '',
+            clinic_name: d.clinic_name || '', zone_id: d.zone_id || '',
+            op_fee: d.op_fee || '', waiting_room: d.waiting_room || '', area_class: d.area_class || '',
+            cancer_services: d.cancer_services || { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
+            refers_to: d.refers_to || '',
+            insurance_accepted: d.insurance_accepted || false, aarogyasri: d.aarogyasri || false,
+            visit_days: d.visit_days || [], visit_hours: d.visit_hours || []
+          });
+        }
+      });
+    }
+  }, [doctorId]);
+
+  const submit = async () => {
+    if (!form.name || !form.specialty) { alert('Name and Specialty required'); return; }
+    setSaving(true);
+    const payload = {
+      ...form,
+      op_fee: form.op_fee ? parseInt(form.op_fee) : null,
+      zone_id: form.zone_id ? parseInt(form.zone_id) : null
+    };
+
+    if (isEdit) {
+      // Compute changed fields
+      const changes = {};
+      Object.keys(payload).forEach(k => {
+        if (JSON.stringify(payload[k]) !== JSON.stringify(original[k])) changes[k] = payload[k];
+      });
+      if (Object.keys(changes).length === 0) { alert('No changes'); setSaving(false); return; }
+
+      if (isAdmin) {
+        await db.updateDoctor(doctorId, changes);
+        alert('Updated ✓');
+      } else {
+        if (!navigator.onLine) {
+          queue.add({ type: 'pending_edit', data: { doctor_id: doctorId, rep_id: user.id, changes }});
+          alert('Edit queued offline. Will submit when online.');
+        } else {
+          await db.addPendingEdit(doctorId, user.id, changes);
+          alert('Edit submitted for admin approval.');
+        }
+      }
+      setSaving(false);
+      goto('doctors');
+      return;
+    }
+
+    // New doctor
+    payload.created_by = user.id;
+    payload.score = 0;
+    payload.tier = 'C';
+
+    if (!navigator.onLine) {
+      queue.add({ type: 'doctor', data: payload });
+      alert('Saved offline. Will sync when online.');
+      setSaving(false);
+      goto('doctors');
+      return;
+    }
+    const { error } = await db.addDoctor(payload);
+    setSaving(false);
+    if (error) { alert('Error: ' + error.message); return; }
+    goto('doctors');
+  };
+
+  const setSvc = (k, v) => setForm({ ...form, cancer_services: { ...form.cancer_services, [k]: v }});
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">{isEdit ? 'Edit Doctor' : 'Add New Doctor'}</h2>
+      {isEdit && !isAdmin && <p className="text-xs bg-yellow-100 p-2 rounded">⚠️ Edits require admin approval before going live.</p>}
+
+      <Field label="Doctor Name *"><input className="input" value={form.name}
+        onChange={e => setForm({...form, name: e.target.value})} /></Field>
+
+      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile}
+        onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
+
+      <Field label="Specialty *"><select className="input" value={form.specialty}
+        onChange={e => setForm({...form, specialty: e.target.value})}>
+        <option value="">Select...</option>
+        {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
+      </select></Field>
+
+      <Field label="Clinic Name"><input className="input" value={form.clinic_name}
+        onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
+
+      <Field label="Zone"><select className="input" value={form.zone_id}
+        onChange={e => setForm({...form, zone_id: e.target.value})}>
+        <option value="">Select...</option>
+        {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+      </select></Field>
+
+      <Field label="OP Fee (₹)"><input className="input" type="number" value={form.op_fee}
+        onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
+
+      <Field label="Waiting Room">
+        <ChipGroup options={['Empty','Few','Steady','Packed']}
+          value={form.waiting_room} onChange={v => setForm({...form, waiting_room: v})} />
+      </Field>
+
+      <Field label="Area Class">
+        <ChipGroup options={['Posh','Mixed','Lower']}
+          value={form.area_class} onChange={v => setForm({...form, area_class: v})} />
+      </Field>
+
+      <div className="bg-white p-3 rounded card-shadow space-y-2">
+        <p className="font-semibold text-sm">Insurance & Schemes</p>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.insurance_accepted}
+            onChange={e => setForm({...form, insurance_accepted: e.target.checked})} />
+          Accepts Insurance
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.aarogyasri}
+            onChange={e => setForm({...form, aarogyasri: e.target.checked})} />
+          Accepts Aarogyasri / Govt Schemes
+        </label>
+      </div>
+
+      <Field label="Best Days to Visit">
+        <ChipGroup options={DAYS} value={form.visit_days} multi
+          onChange={v => setForm({...form, visit_days: v})} />
+      </Field>
+
+      <Field label="Best Time Slots">
+        <ChipGroup options={HOURS} value={form.visit_hours} multi
+          onChange={v => setForm({...form, visit_hours: v})} />
+      </Field>
+
+      <div className="bg-white p-3 rounded card-shadow">
+        <p className="font-semibold mb-2 text-sm">Cancer Service Map</p>
+        {[
+          ['biopsy','Biopsy'],['screening','Screening'],['surgery','Complex Surgery'],
+          ['chemo','Chemotherapy'],['radiation','Radiation'],['supportive','Supportive Care']
+        ].map(([k, label]) => (
+          <div key={k} className="flex items-center justify-between py-1">
+            <span className="text-sm">{label}</span>
+            <div className="flex gap-1">
+              {[['in','In'],['out','Out'],['na','N/A']].map(([v,lbl]) => (
+                <span key={v} className={'chip ' + (form.cancer_services[k] === v ? 'chip-on' : 'chip-off')}
+                  onClick={() => setSvc(k, v)}>{lbl}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Field label="Refers To (who/where)"><input className="input" value={form.refers_to}
+        onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
+
+      <button onClick={submit} disabled={saving}
+        className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
+        {saving ? 'Saving...' : (isEdit ? (isAdmin ? 'Save Changes' : 'Submit for Approval') : 'Save Doctor')}
+      </button>
+      <button onClick={() => goto('doctors')} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
+    </div>
+  );
+}
+
+function LogVisit({ user, goto, preDoctorId = null }) {
   const [doctors, setDoctors] = useState([]);
-  const [doctorId, setDoctorId] = useState('');
+  const [doctorId, setDoctorId] = useState(preDoctorId || '');
   const [form, setForm] = useState({
     met_status: '', time_spent: '', interest: 3, referral_likely: '',
-    outcome: '', notes: '', stump_question: '', next_followup: ''
+    phone_status: '', phone_captured: '',
+    suspicious_cases: '',
+    notes: '', stump_question: '', next_followup: '',
+    update_visit_time: false, visit_days: [], visit_hours: []
   });
   const [gps, setGps] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -509,6 +696,8 @@ function LogVisit({ user, onDone }) {
     }
   }, []);
 
+  const selectedDoc = doctors.find(d => d.id === doctorId);
+
   const submit = async () => {
     if (!doctorId) { alert('Select a doctor'); return; }
     if (!form.met_status) { alert('Mark met status'); return; }
@@ -516,8 +705,12 @@ function LogVisit({ user, onDone }) {
 
     const visit = {
       doctor_id: doctorId, rep_id: user.id, visit_type: 'followup',
-      ...form,
-      interest: parseInt(form.interest),
+      met_status: form.met_status, time_spent: form.time_spent,
+      interest: parseInt(form.interest), referral_likely: form.referral_likely,
+      phone_status: form.phone_status || null,
+      phone_captured: form.phone_status === 'got_today' ? form.phone_captured : null,
+      suspicious_cases: form.suspicious_cases || null,
+      notes: form.notes, stump_question: form.stump_question,
       next_followup: form.next_followup || null,
       gps_lat: gps?.lat, gps_lng: gps?.lng
     };
@@ -525,23 +718,30 @@ function LogVisit({ user, onDone }) {
     if (!navigator.onLine) {
       queue.add({ type: 'visit', data: visit });
       alert('Saved offline. Will sync when online.');
-      onDone();
+      goto('home');
       return;
     }
 
     const { error } = await db.addVisit(visit);
     if (error) { alert('Error: ' + error.message); setSaving(false); return; }
 
-    const doc = doctors.find(d => d.id === doctorId);
-    if (doc) {
-      const newScore = scoring.calculate(doc, visit);
+    if (selectedDoc) {
+      const newScore = scoring.calculate(selectedDoc, visit);
       const newTier = scoring.tier(newScore);
-      await db.updateDoctor(doctorId, { score: newScore, tier: newTier, next_followup: visit.next_followup });
+      const updates = { score: newScore, tier: newTier, next_followup: visit.next_followup };
+      if (form.phone_status === 'got_today' && form.phone_captured) {
+        updates.mobile = form.phone_captured;
+      }
+      if (form.update_visit_time) {
+        updates.visit_days = form.visit_days;
+        updates.visit_hours = form.visit_hours;
+      }
+      await db.updateDoctor(doctorId, updates);
     }
 
     setSaving(false);
     alert('Visit logged ✓');
-    onDone();
+    goto('home');
   };
 
   return (
@@ -556,23 +756,14 @@ function LogVisit({ user, onDone }) {
       </Field>
 
       <Field label="Met status *">
-        <div className="grid grid-cols-3 gap-1">
-          {[['doctor','Doctor'],['staff','Staff'],['not_met','Not met']].map(([v,l]) => (
-            <button key={v} type="button"
-              className={'py-2 rounded text-sm ' + (form.met_status === v ? 'cion-primary text-white' : 'bg-gray-200')}
-              onClick={() => setForm({...form, met_status: v})}>{l}</button>
-          ))}
-        </div>
+        <ChipGroup options={['Doctor','Staff','Not met']}
+          value={form.met_status === 'doctor' ? 'Doctor' : form.met_status === 'staff' ? 'Staff' : form.met_status === 'not_met' ? 'Not met' : ''}
+          onChange={v => setForm({...form, met_status: v === 'Doctor' ? 'doctor' : v === 'Staff' ? 'staff' : 'not_met'})} />
       </Field>
 
       <Field label="Time spent">
-        <div className="grid grid-cols-3 gap-1">
-          {['2min','5min','10min+'].map(v => (
-            <button key={v} type="button"
-              className={'py-2 rounded text-sm ' + (form.time_spent === v ? 'cion-primary text-white' : 'bg-gray-200')}
-              onClick={() => setForm({...form, time_spent: v})}>{v}</button>
-          ))}
-        </div>
+        <ChipGroup options={['2min','5min','10min+']}
+          value={form.time_spent} onChange={v => setForm({...form, time_spent: v})} />
       </Field>
 
       <Field label={'Interest: ' + form.interest + '/5'}>
@@ -581,19 +772,28 @@ function LogVisit({ user, onDone }) {
       </Field>
 
       <Field label="Referral likely?">
-        <div className="grid grid-cols-3 gap-1">
-          {[['yes','Yes'],['maybe','Maybe'],['no','No']].map(([v,l]) => (
-            <button key={v} type="button"
-              className={'py-2 rounded text-sm ' + (form.referral_likely === v ? 'cion-primary text-white' : 'bg-gray-200')}
-              onClick={() => setForm({...form, referral_likely: v})}>{l}</button>
-          ))}
-        </div>
+        <ChipGroup options={['yes','maybe','no']}
+          value={form.referral_likely} onChange={v => setForm({...form, referral_likely: v})} />
       </Field>
 
-      <Field label="Outcome"><input className="input" value={form.outcome}
-        onChange={e => setForm({...form, outcome: e.target.value})} /></Field>
+      <Field label="Phone Number">
+        {selectedDoc?.mobile && <p className="text-xs text-gray-600 mb-1">On file: {selectedDoc.mobile}</p>}
+        <ChipGroup options={['Already on file','Got today','Not given']}
+          value={form.phone_status === 'on_file' ? 'Already on file' : form.phone_status === 'got_today' ? 'Got today' : form.phone_status === 'not_given' ? 'Not given' : ''}
+          onChange={v => setForm({...form, phone_status: v === 'Already on file' ? 'on_file' : v === 'Got today' ? 'got_today' : 'not_given'})} />
+        {form.phone_status === 'got_today' && (
+          <input className="input mt-2" type="tel" maxLength="10" placeholder="Enter 10-digit number"
+            value={form.phone_captured}
+            onChange={e => setForm({...form, phone_captured: e.target.value.replace(/\D/g,'')})} />
+        )}
+      </Field>
 
-      <Field label="Stump Question (what you couldn't answer)">
+      <Field label="Suspicious cancer cases per month">
+        <ChipGroup options={['1-2','3-5','more','quarterly','rarely']}
+          value={form.suspicious_cases} onChange={v => setForm({...form, suspicious_cases: v})} />
+      </Field>
+
+      <Field label="Stump Question / Anything new he asked">
         <textarea className="input" rows="2" value={form.stump_question}
           onChange={e => setForm({...form, stump_question: e.target.value})} />
       </Field>
@@ -607,58 +807,203 @@ function LogVisit({ user, onDone }) {
           onChange={e => setForm({...form, next_followup: e.target.value})} />
       </Field>
 
+      <div className="bg-white p-3 rounded card-shadow">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.update_visit_time}
+            onChange={e => setForm({...form, update_visit_time: e.target.checked})} />
+          Update best visit time for this doctor?
+        </label>
+        {form.update_visit_time && (
+          <div className="space-y-2 mt-2">
+            <p className="text-xs">Days:</p>
+            <ChipGroup options={DAYS} multi value={form.visit_days}
+              onChange={v => setForm({...form, visit_days: v})} />
+            <p className="text-xs mt-2">Time slots:</p>
+            <ChipGroup options={HOURS} multi value={form.visit_hours}
+              onChange={v => setForm({...form, visit_hours: v})} />
+          </div>
+        )}
+      </div>
+
       {gps && <p className="text-xs text-gray-500">📍 GPS captured</p>}
 
       <button onClick={submit} disabled={saving}
         className="w-full cion-accent text-white py-4 rounded-lg font-bold text-lg disabled:opacity-50">
         {saving ? 'Saving...' : 'Submit Visit ✓'}
       </button>
+      <button onClick={() => goto('home')} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
     </div>
   );
 }
 
-function Learn() {
-  const [cards, setCards] = useState([]);
-  const [idx, setIdx] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+function Learn({ user }) {
+  const [lessons, setLessons] = useState([]);
+  const [activeCat, setActiveCat] = useState(null);
+  const [selectedLesson, setSelectedLesson] = useState(null);
+  useEffect(() => { db.getLessons().then(setLessons); }, []);
 
-  useEffect(() => { db.getCards().then(setCards); }, []);
+  if (selectedLesson) {
+    return <LessonView lessonId={selectedLesson.id} user={user} goto={(s, p) => {
+      if (s === 'learn') { setSelectedLesson(null); return; }
+    }} />;
+  }
 
-  if (cards.length === 0) return <p>Loading cards...</p>;
-  const card = cards[idx];
+  if (activeCat) {
+    const filtered = lessons.filter(l => l.category === activeCat);
+    return (
+      <div className="space-y-3">
+        <button onClick={() => setActiveCat(null)} className="text-sm text-purple-700 underline">← Back to categories</button>
+        <h2 className="font-bold text-lg cion-primary-text">{LEARNING_CATEGORIES.find(c => c.key === activeCat)?.name}</h2>
+        {filtered.length === 0 ? <p className="text-gray-500">No lessons yet in this category.</p> :
+         filtered.map(l => (
+          <div key={l.id} onClick={() => setSelectedLesson(l)}
+            className="bg-white p-3 rounded card-shadow cursor-pointer">
+            <p className="font-semibold">{l.title}</p>
+            {l.subcategory && <p className="text-xs text-gray-500">{l.subcategory}</p>}
+          </div>
+         ))
+        }
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">Learn Cancer Care</h2>
+      <p className="text-xs text-gray-500">Tap a category to see lessons</p>
+      <div className="grid grid-cols-2 gap-3">
+        {LEARNING_CATEGORIES.map(c => {
+          const count = lessons.filter(l => l.category === c.key).length;
+          return (
+            <div key={c.key} onClick={() => setActiveCat(c.key)}
+              className="bg-white p-4 rounded card-shadow cursor-pointer text-center">
+              <p className="text-3xl">{c.icon}</p>
+              <p className="font-semibold text-sm mt-1">{c.name}</p>
+              <p className="text-xs text-gray-500">{count} lesson{count !== 1 ? 's' : ''}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LessonView({ lessonId, user, goto }) {
+  const [lesson, setLesson] = useState(null);
+  useEffect(() => {
+    db.getLessons().then(all => setLesson(all.find(l => l.id === lessonId)));
+  }, [lessonId]);
+
+  if (!lesson) return <p>Loading...</p>;
 
   return (
     <div className="space-y-4">
-      <h2 className="font-bold text-lg cion-primary-text">Cheat Sheet</h2>
-      <p className="text-xs text-gray-500">{idx + 1} / {cards.length} · {card.category}</p>
-      <div onClick={() => setFlipped(!flipped)}
-        className="bg-white p-6 rounded-lg card-shadow min-h-40 flex items-center justify-center cursor-pointer">
-        <p className="text-center text-lg font-medium">{flipped ? card.back : card.front}</p>
-      </div>
-      <p className="text-center text-xs text-gray-500">Tap card to flip</p>
-      <div className="flex gap-2">
-        <button onClick={() => { setIdx(Math.max(0, idx-1)); setFlipped(false); }}
-          className="flex-1 bg-gray-300 py-3 rounded font-bold">← Prev</button>
-        <button onClick={() => { setIdx(Math.min(cards.length-1, idx+1)); setFlipped(false); }}
-          className="flex-1 cion-primary text-white py-3 rounded font-bold">Next →</button>
-      </div>
+      <button onClick={() => goto('learn')} className="text-sm text-purple-700 underline">← Back</button>
+      <h2 className="font-bold text-xl cion-primary-text">{lesson.title}</h2>
+      <p className="text-xs text-gray-500">{lesson.category}{lesson.subcategory ? ' · ' + lesson.subcategory : ''}</p>
+      <div className="bg-white p-4 rounded card-shadow whitespace-pre-line text-sm leading-relaxed">{lesson.body}</div>
+      <button onClick={() => goto('quiz', { lessonId: lesson.id })}
+        className="w-full cion-accent text-white py-3 rounded-lg font-bold">
+        Take Quiz (10 MCQs)
+      </button>
     </div>
   );
 }
 
-function Dashboard() {
+function Quiz({ lessonId, user, goto }) {
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [score, setScore] = useState(0);
+
+  useEffect(() => { db.getQuizQuestions(lessonId).then(setQuestions); }, [lessonId]);
+
+  const submit = async () => {
+    let s = 0;
+    questions.forEach(q => { if (answers[q.id] === q.correct_index) s++; });
+    setScore(s);
+    setSubmitted(true);
+    const passed = (s / questions.length) >= 0.7;
+    await db.logQuizAttempt({
+      rep_id: user.id, lesson_id: lessonId,
+      score: s, total: questions.length, passed
+    });
+  };
+
+  if (questions.length === 0) return (
+    <div className="space-y-3">
+      <button onClick={() => goto('learn')} className="text-sm text-purple-700 underline">← Back</button>
+      <p className="text-gray-500">No quiz available yet for this lesson.</p>
+    </div>
+  );
+
+  if (submitted) {
+    const passed = (score / questions.length) >= 0.7;
+    return (
+      <div className="space-y-4">
+        <div className={'p-6 rounded-lg text-center text-white ' + (passed ? 'bg-green-600' : 'bg-red-600')}>
+          <p className="text-4xl font-bold">{score}/{questions.length}</p>
+          <p className="mt-2">{passed ? '✓ Passed!' : '✗ Try again next time'}</p>
+        </div>
+        <h3 className="font-bold">Review:</h3>
+        {questions.map((q, i) => {
+          const userAns = answers[q.id];
+          const correct = q.correct_index;
+          return (
+            <div key={q.id} className="bg-white p-3 rounded card-shadow">
+              <p className="font-semibold text-sm">{i+1}. {q.question}</p>
+              {q.options.map((opt, oi) => (
+                <p key={oi} className={'text-sm mt-1 ' + (oi === correct ? 'text-green-700 font-semibold' : oi === userAns ? 'text-red-700' : 'text-gray-600')}>
+                  {oi === correct ? '✓ ' : oi === userAns ? '✗ ' : '  '}{opt}
+                </p>
+              ))}
+            </div>
+          );
+        })}
+        <button onClick={() => goto('learn')} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-lg cion-primary-text">Quiz</h2>
+      <p className="text-xs text-gray-500">Answer all 10. Pass = 70%+</p>
+      {questions.map((q, i) => (
+        <div key={q.id} className="bg-white p-3 rounded card-shadow">
+          <p className="font-semibold text-sm mb-2">{i+1}. {q.question}</p>
+          {q.options.map((opt, oi) => (
+            <label key={oi} className="flex items-start gap-2 py-1 cursor-pointer">
+              <input type="radio" name={'q' + q.id} checked={answers[q.id] === oi}
+                onChange={() => setAnswers({...answers, [q.id]: oi})} />
+              <span className="text-sm">{opt}</span>
+            </label>
+          ))}
+        </div>
+      ))}
+      <button onClick={submit}
+        disabled={Object.keys(answers).length < questions.length}
+        className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">
+        Submit Quiz
+      </button>
+    </div>
+  );
+}
+
+function Dashboard({ goto }) {
   const [stats, setStats] = useState(null);
   useEffect(() => { db.getDashboardStats().then(setStats); }, []);
   if (!stats) return <p>Loading...</p>;
 
   const byRep = {};
-  stats.reps.forEach(r => byRep[r.id] = { name: r.name, visits: 0, doctorsMet: new Set() });
+  stats.reps.forEach(r => byRep[r.id] = { name: r.name, visits: 0, doctorsMet: new Set(), referrals: 0 });
   stats.visits.forEach(v => {
     if (byRep[v.rep_id]) {
       byRep[v.rep_id].visits++;
       if (v.met_status === 'doctor') byRep[v.rep_id].doctorsMet.add(v.doctor_id);
     }
   });
+  stats.referrals.forEach(r => { if (r.influenced_by_rep && byRep[r.influenced_by_rep]) byRep[r.influenced_by_rep].referrals++; });
 
   const tierCount = { A: 0, B: 0, C: 0 };
   stats.doctors.forEach(d => { if (d.tier) tierCount[d.tier]++; });
@@ -667,17 +1012,26 @@ function Dashboard() {
     <div className="space-y-4">
       <h2 className="font-bold text-lg cion-primary-text">Manager Dashboard</h2>
 
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => goto('addReferral')}
+          className="cion-accent text-white py-3 rounded font-bold text-sm">🎯 Log Referral</button>
+        <button onClick={() => goto('pendingEdits')}
+          className="cion-primary text-white py-3 rounded font-bold text-sm">
+          📝 Pending Edits {stats.pendingEdits > 0 && '(' + stats.pendingEdits + ')'}
+        </button>
+      </div>
+
       <div className="grid grid-cols-3 gap-2">
         <StatBox label="Doctors" val={stats.doctors.length} />
         <StatBox label="Visits" val={stats.visits.length} />
-        <StatBox label="Reps" val={stats.reps.length} />
+        <StatBox label="Referrals" val={stats.referrals.length} />
       </div>
 
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2">Rep Performance</h3>
         <table className="w-full text-sm">
           <thead><tr className="text-left text-gray-500">
-            <th>Rep</th><th>Visits</th><th>Doctors Met</th>
+            <th>Rep</th><th>Visits</th><th>Met</th><th>Refs</th>
           </tr></thead>
           <tbody>
           {Object.values(byRep).map(r => (
@@ -685,6 +1039,7 @@ function Dashboard() {
               <td className="py-2">{r.name}</td>
               <td>{r.visits}</td>
               <td>{r.doctorsMet.size}</td>
+              <td>{r.referrals}</td>
             </tr>
           ))}
           </tbody>
@@ -694,25 +1049,61 @@ function Dashboard() {
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2">Doctor Tiers</h3>
         <div className="flex gap-3">
-          <div className="flex-1 bg-red-100 p-3 rounded text-center">
-            <p className="text-xs text-red-700">Tier A</p>
-            <p className="text-2xl font-bold text-red-700">{tierCount.A}</p>
-          </div>
-          <div className="flex-1 bg-yellow-100 p-3 rounded text-center">
-            <p className="text-xs text-yellow-700">Tier B</p>
-            <p className="text-2xl font-bold text-yellow-700">{tierCount.B}</p>
-          </div>
-          <div className="flex-1 bg-gray-100 p-3 rounded text-center">
-            <p className="text-xs text-gray-700">Tier C</p>
-            <p className="text-2xl font-bold text-gray-700">{tierCount.C}</p>
-          </div>
+          {['A','B','C'].map(t => (
+            <div key={t} className={'flex-1 p-3 rounded text-center ' + (
+              t === 'A' ? 'bg-red-100' : t === 'B' ? 'bg-yellow-100' : 'bg-gray-100')}>
+              <p className="text-xs">{TIER_GUIDANCE[t].emoji} Tier {t}</p>
+              <p className="text-2xl font-bold">{tierCount[t]}</p>
+              <p className="text-xs">{TIER_GUIDANCE[t].advice}</p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-function AddReferral({ onDone }) {
+function PendingEditsQueue({ user, goto }) {
+  const [edits, setEdits] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => db.getPendingEdits().then(d => { setEdits(d); setLoading(false); });
+  useEffect(() => { load(); }, []);
+
+  const approve = async (e) => {
+    if (!confirm('Approve and apply these changes?')) return;
+    await db.approveEdit(e.id, e.doctor_id, e.changes, user.id);
+    load();
+  };
+  const reject = async (e) => {
+    const reason = prompt('Reason for rejection?') || '';
+    await db.rejectEdit(e.id, user.id, reason);
+    load();
+  };
+
+  return (
+    <div className="space-y-3">
+      <button onClick={() => goto('dashboard')} className="text-sm text-purple-700 underline">← Back</button>
+      <h2 className="font-bold text-lg cion-primary-text">Pending Edits</h2>
+      {loading ? <p>Loading...</p> :
+       edits.length === 0 ? <p className="text-gray-500">No pending edits.</p> :
+       edits.map(e => (
+        <div key={e.id} className="bg-white p-3 rounded card-shadow">
+          <p className="font-semibold">{e.doctors?.name}</p>
+          <p className="text-xs text-gray-500">By {e.reps?.name} on {new Date(e.created_at).toLocaleString()}</p>
+          <pre className="text-xs bg-gray-50 p-2 mt-2 rounded overflow-auto">{JSON.stringify(e.changes, null, 2)}</pre>
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => approve(e)} className="flex-1 bg-green-600 text-white py-2 rounded">Approve</button>
+            <button onClick={() => reject(e)} className="flex-1 bg-red-600 text-white py-2 rounded">Reject</button>
+          </div>
+        </div>
+       ))
+      }
+    </div>
+  );
+}
+
+function AddReferral({ goto }) {
   const [doctors, setDoctors] = useState([]);
   const [reps, setReps] = useState([]);
   const [zones, setZones] = useState([]);
@@ -738,11 +1129,12 @@ function AddReferral({ onDone }) {
     setSaving(false);
     if (error) { alert('Error: ' + error.message); return; }
     alert('Referral logged ✓');
-    onDone();
+    goto('dashboard');
   };
 
   return (
     <div className="space-y-3">
+      <button onClick={() => goto('dashboard')} className="text-sm text-purple-700 underline">← Back</button>
       <h2 className="font-bold text-lg cion-primary-text">Log Referral</h2>
       <Field label="Patient Name *"><input className="input" value={form.patient_name}
         onChange={e => setForm({...form, patient_name: e.target.value})} /></Field>
@@ -795,20 +1187,17 @@ function StatBox({ label, val }) {
   );
 }
 
-function BottomNav({ screen, setScreen, isAdmin }) {
+function BottomNav({ screen, goto, isAdmin }) {
   const items = [
     ['home', '🏠', 'Home'],
     ['doctors', '👨‍⚕️', 'Doctors'],
-    ['learn', '🎓', 'Learn'],
+    ['learn', '🎓', 'Learn']
   ];
-  if (isAdmin) {
-    items.push(['dashboard', '📊', 'Dash']);
-    items.push(['referral', '🎯', 'Refer']);
-  }
+  if (isAdmin) items.push(['dashboard', '📊', 'Dashboard']);
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2 card-shadow">
       {items.map(([key, icon, label]) => (
-        <button key={key} onClick={() => setScreen(key)}
+        <button key={key} onClick={() => goto(key)}
           className={'flex flex-col items-center p-1 ' + (screen === key ? 'cion-primary-text' : 'text-gray-500')}>
           <span className="text-xl">{icon}</span>
           <span className="text-xs">{label}</span>
