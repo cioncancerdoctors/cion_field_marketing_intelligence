@@ -29,22 +29,13 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-// =========================================
-// SECTION 1: CONFIG
-// =========================================
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 const APP_PASSWORD = 'Cion@12345';
 
-// =========================================
-// SECTION 2: SUPABASE CLIENT
-// =========================================
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// =========================================
-// SECTION 3: CONSTANTS
-// =========================================
 const SPECIALTIES = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','General Surgeon','Paediatrician','Small Hospital','Large Hospital','Diagnostic Centre','Other'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const HOURS = ['9-10 AM','10-11 AM','11-12 PM','12-1 PM','1-2 PM','2-3 PM','3-4 PM','4-5 PM','5-6 PM','6-7 PM','7-8 PM','8-9 PM'];
@@ -77,9 +68,6 @@ const TOPICS = [
   { key: 'outcomes', label: '🎯 Outcomes', cat: 'cion_services' }
 ];
 
-// =========================================
-// SECTION 4: DB HELPERS
-// =========================================
 const db = {
   async getReps() {
     const { data } = await supa.from('reps').select('*').eq('active', true).order('name');
@@ -98,7 +86,6 @@ const db = {
       const { data } = await supa.from('doctors').select('*, zones(name)').order('score', { ascending: false });
       return data || [];
     }
-    // Rep sees: doctors he created OR visited
     const { data: created } = await supa.from('doctors').select('*, zones(name)').eq('created_by', repId);
     const { data: visited } = await supa.from('visits').select('doctor_id').eq('rep_id', repId);
     const visitedIds = [...new Set((visited || []).map(v => v.doctor_id))];
@@ -110,20 +97,14 @@ const db = {
     const merged = [...(created || []), ...extra.filter(e => !(created || []).find(c => c.id === e.id))];
     return merged.sort((a, b) => (b.score || 0) - (a.score || 0));
   },
-  async addDoctor(doc) {
-    return await supa.from('doctors').insert([doc]).select().single();
-  },
-  async updateDoctor(id, updates) {
-    return await supa.from('doctors').update(updates).eq('id', id);
-  },
+  async addDoctor(doc) { return await supa.from('doctors').insert([doc]).select().single(); },
+  async updateDoctor(id, updates) { return await supa.from('doctors').update(updates).eq('id', id); },
   async addPendingEdit(doctorId, repId, changes) {
     return await supa.from('pending_edits').insert([{ doctor_id: doctorId, rep_id: repId, changes }]);
   },
   async getPendingEdits() {
     const { data } = await supa.from('pending_edits')
-      .select('*, doctors(name), reps(name)')
-      .eq('status','pending')
-      .order('created_at');
+      .select('*, doctors(name), reps(name)').eq('status','pending').order('created_at');
     return data || [];
   },
   async approveEdit(editId, doctorId, changes, reviewerId) {
@@ -139,15 +120,11 @@ const db = {
   },
   async getVisits(repId, limit = 50) {
     const { data } = await supa.from('visits')
-      .select('*, doctors(name, clinic_name)')
-      .eq('rep_id', repId)
-      .order('visited_at', { ascending: false })
-      .limit(limit);
+      .select('*, doctors(name, clinic_name)').eq('rep_id', repId)
+      .order('visited_at', { ascending: false }).limit(limit);
     return data || [];
   },
-  async addVisit(visit) {
-    return await supa.from('visits').insert([visit]).select().single();
-  },
+  async addVisit(visit) { return await supa.from('visits').insert([visit]).select().single(); },
   async getTodayActions(repId, isAdmin) {
     const docs = await this.getDoctors(repId, isAdmin);
     const today = new Date().toISOString().split('T')[0];
@@ -161,9 +138,7 @@ const db = {
     const { data: referrals } = await supa.from('referrals').select('influenced_by_rep, referred_by_doctor');
     return { visits: visits || [], reps: reps || [], doctors: doctors || [], pendingEdits: pendingCount?.length || 0, referrals: referrals || [] };
   },
-  async addReferral(ref) {
-    return await supa.from('referrals').insert([ref]).select().single();
-  },
+  async addReferral(ref) { return await supa.from('referrals').insert([ref]).select().single(); },
   async getLessons() {
     const { data } = await supa.from('lessons').select('*').eq('active', true).order('display_order');
     return data || [];
@@ -176,9 +151,7 @@ const db = {
     const { data } = await supa.from('quiz_questions').select('*').eq('lesson_id', lessonId).eq('active', true);
     return data || [];
   },
-  async logQuizAttempt(att) {
-    return await supa.from('quiz_attempts').insert([att]);
-  },
+  async logQuizAttempt(att) { return await supa.from('quiz_attempts').insert([att]); },
   async getDailyLesson() {
     const today = new Date().toISOString().split('T')[0];
     const { data } = await supa.from('daily_lessons').select('*, lessons(*)').eq('scheduled_date', today).maybeSingle();
@@ -189,9 +162,6 @@ const db = {
   }
 };
 
-// =========================================
-// SECTION 5: SCORING
-// =========================================
 const scoring = {
   calculate(doc, lastVisit = null) {
     let interest = 0, load = 0, fit = 0, warmth = 0, topics = 0;
@@ -215,9 +185,6 @@ const scoring = {
   }
 };
 
-// =========================================
-// SECTION 6: OFFLINE QUEUE
-// =========================================
 const queue = {
   key: 'cion_offline_queue',
   add(item) {
@@ -225,9 +192,7 @@ const queue = {
     q.push({ ...item, queuedAt: Date.now() });
     localStorage.setItem(this.key, JSON.stringify(q));
   },
-  all() {
-    try { return JSON.parse(localStorage.getItem(this.key) || '[]'); } catch { return []; }
-  },
+  all() { try { return JSON.parse(localStorage.getItem(this.key) || '[]'); } catch { return []; } },
   async sync() {
     const items = this.all();
     if (items.length === 0) return 0;
@@ -246,9 +211,6 @@ const queue = {
   }
 };
 
-// =========================================
-// SECTION 7: APP
-// =========================================
 const { useState, useEffect } = React;
 
 function App() {
@@ -286,7 +248,6 @@ function App() {
     sessionStorage.removeItem('cion_user');
     setScreen('home');
   };
-
   const goto = (s, params = {}) => { setScreen(s); setScreenParams(params); };
 
   if (!currentUser) return <Login onLogin={handleLogin} />;
@@ -451,9 +412,7 @@ function Home({ user, goto }) {
 
       <div className="bg-white rounded-lg card-shadow p-4">
         <h2 className="font-bold mb-2 cion-primary-text">🔴 Today's Action List</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          🔥 A: 3–4×/mo · ☀️ B: 1–2×/mo · ❄️ C: 1×/mo
-        </p>
+        <p className="text-xs text-gray-500 mb-3">🔥 A: 3–4×/mo · ☀️ B: 1–2×/mo · ❄️ C: 1×/mo</p>
         {loading ? <p className="text-sm text-gray-500">Loading...</p> :
          actions.length === 0 ? <p className="text-sm text-gray-500">No pending follow-ups. Add doctors and log visits to build your list.</p> :
          actions.slice(0, 8).map(a => (
@@ -496,9 +455,7 @@ function DoctorList({ user, goto }) {
         <button onClick={() => goto('addDoctor')}
           className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
       </div>
-      <p className="text-xs text-gray-500">
-        🔥 A: meet 3–4×/mo · ☀️ B: 1–2×/mo · ❄️ C: 1×/mo
-      </p>
+      <p className="text-xs text-gray-500">🔥 A: meet 3–4×/mo · ☀️ B: 1–2×/mo · ❄️ C: 1×/mo</p>
       {loading ? <p>Loading...</p> :
        filtered.length === 0 ? <p className="text-gray-500 text-center py-8">No doctors yet. Tap "+ Add"</p> :
        filtered.map(d => (
@@ -554,7 +511,6 @@ function DoctorForm({ user, goto, doctorId = null }) {
     op_fee: '', waiting_room: '', area_class: '',
     cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
     refers_to: '',
-    insurance_accepted: false, aarogyasri: false,
     visit_days: [], visit_hours: []
   });
   const [saving, setSaving] = useState(false);
@@ -572,7 +528,6 @@ function DoctorForm({ user, goto, doctorId = null }) {
             op_fee: d.op_fee || '', waiting_room: d.waiting_room || '', area_class: d.area_class || '',
             cancer_services: d.cancer_services || { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
             refers_to: d.refers_to || '',
-            insurance_accepted: d.insurance_accepted || false, aarogyasri: d.aarogyasri || false,
             visit_days: d.visit_days || [], visit_hours: d.visit_hours || []
           });
         }
@@ -639,57 +594,34 @@ function DoctorForm({ user, goto, doctorId = null }) {
 
       <Field label="Doctor Name *"><input className="input" value={form.name}
         onChange={e => setForm({...form, name: e.target.value})} /></Field>
-
       <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile}
         onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
-
       <Field label="Specialty *"><select className="input" value={form.specialty}
         onChange={e => setForm({...form, specialty: e.target.value})}>
         <option value="">Select...</option>
         {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
       </select></Field>
-
       <Field label="Clinic Name"><input className="input" value={form.clinic_name}
         onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
-
       <Field label="Zone *"><select className="input" value={form.zone_id}
         onChange={e => setForm({...form, zone_id: e.target.value})}>
         <option value="">Select...</option>
         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
       </select></Field>
-
       <Field label="OP Fee (₹)"><input className="input" type="number" value={form.op_fee}
         onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
-
       <Field label="Waiting Room">
         <ChipGroup options={['Empty','Few','Steady','Packed']}
           value={form.waiting_room} onChange={v => setForm({...form, waiting_room: v})} />
       </Field>
-
       <Field label="Area Class">
         <ChipGroup options={['Posh','Mixed','Lower']}
           value={form.area_class} onChange={v => setForm({...form, area_class: v})} />
       </Field>
-
-      <div className="bg-white p-3 rounded card-shadow space-y-2">
-        <p className="font-semibold text-sm">Insurance & Schemes</p>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.insurance_accepted}
-            onChange={e => setForm({...form, insurance_accepted: e.target.checked})} />
-          Accepts Insurance
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.aarogyasri}
-            onChange={e => setForm({...form, aarogyasri: e.target.checked})} />
-          Accepts Aarogyasri / Govt Schemes
-        </label>
-      </div>
-
       <Field label="Best Days to Visit">
         <ChipGroup options={DAYS} value={form.visit_days} multi
           onChange={v => setForm({...form, visit_days: v})} />
       </Field>
-
       <Field label="Best Time Slots">
         <ChipGroup options={HOURS} value={form.visit_hours} multi
           onChange={v => setForm({...form, visit_hours: v})} />
@@ -735,19 +667,18 @@ function LogVisit({ user, goto, preDoctorId = null }) {
     phone_status: '', phone_captured: '',
     suspicious_cases: '',
     topics_asked: [],
-    notes: '', stump_question: '', next_followup: '',
+    stump_question: '', next_followup: '',
     update_visit_time: false, visit_days: [], visit_hours: []
   });
   const [gps, setGps] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [showHints, setShowHints] = useState(false);
+  const [feedback, setFeedback] = useState(null);
   const isAdmin = user.role === 'admin';
 
   useEffect(() => {
     db.getDoctors(user.id, isAdmin).then(setDoctors);
     db.getZones().then(setZones);
     if (preDoctorId) {
-      // pre-select zone of the doctor
       db.getDoctors(user.id, isAdmin).then(docs => {
         const d = docs.find(x => x.id === preDoctorId);
         if (d?.zone_id) setZoneId(String(d.zone_id));
@@ -780,7 +711,7 @@ function LogVisit({ user, goto, preDoctorId = null }) {
       phone_captured: form.phone_status === 'got_today' ? form.phone_captured : null,
       suspicious_cases: form.suspicious_cases || null,
       topics_asked: form.topics_asked,
-      notes: form.notes, stump_question: form.stump_question,
+      stump_question: form.stump_question,
       next_followup: form.next_followup || null,
       gps_lat: gps?.lat, gps_lng: gps?.lng
     };
@@ -795,9 +726,13 @@ function LogVisit({ user, goto, preDoctorId = null }) {
     const { error } = await db.addVisit(visit);
     if (error) { alert('Error: ' + error.message); setSaving(false); return; }
 
+    let oldTier = selectedDoc?.tier || 'C';
+    let oldScore = selectedDoc?.score || 0;
+    let newScore = oldScore, newTier = oldTier;
+
     if (selectedDoc) {
-      const newScore = scoring.calculate(selectedDoc, visit);
-      const newTier = scoring.tier(newScore);
+      newScore = scoring.calculate(selectedDoc, visit);
+      newTier = scoring.tier(newScore);
       const updates = { score: newScore, tier: newTier, next_followup: visit.next_followup };
       if (form.phone_status === 'got_today' && form.phone_captured) {
         updates.mobile = form.phone_captured;
@@ -810,38 +745,91 @@ function LogVisit({ user, goto, preDoctorId = null }) {
     }
 
     setSaving(false);
-
-    if (form.topics_asked.length > 0) {
-      setShowHints(true);
-    } else {
-      alert('Visit logged ✓');
-      goto('home');
-    }
+    setFeedback({
+      doctorName: selectedDoc?.name,
+      oldTier, newTier, oldScore, newScore,
+      pointsGained: newScore - oldScore,
+      topicsAsked: form.topics_asked,
+      nextFollowup: form.next_followup,
+      stumpQ: form.stump_question
+    });
   };
 
-  if (showHints) {
+  if (feedback) {
+    const tierUp = ['C','B','A'].indexOf(feedback.newTier) > ['C','B','A'].indexOf(feedback.oldTier);
+    const tierDown = ['C','B','A'].indexOf(feedback.newTier) < ['C','B','A'].indexOf(feedback.oldTier);
     return (
       <div className="space-y-3">
         <div className="bg-green-100 border-l-4 border-green-600 p-4 rounded">
-          <p className="font-bold text-green-800">✓ Visit Logged</p>
-          <p className="text-xs text-green-700">+{form.topics_asked.length * 2} score boost from doctor's questions</p>
+          <p className="font-bold text-green-800">✓ Visit Logged for {feedback.doctorName}</p>
         </div>
-        <h3 className="font-bold text-sm">💡 Doctor asked about — read these:</h3>
-        {form.topics_asked.map(tk => {
-          const t = TOPICS.find(x => x.key === tk);
-          if (!t) return null;
-          return (
-            <div key={tk} onClick={async () => {
-              const lessons = await db.getLessonsByCategory(t.cat);
-              if (lessons.length > 0) goto('lessonView', { lessonId: lessons[0].id });
-              else alert('No lesson available yet for: ' + t.label);
-            }}
-              className="bg-white p-3 rounded card-shadow cursor-pointer flex justify-between items-center">
-              <span className="text-sm">{t.label}</span>
-              <span className="text-xs text-purple-700">Read →</span>
+
+        <div className="bg-white p-4 rounded card-shadow space-y-3">
+          <h3 className="font-bold cion-primary-text">📊 Visit Feedback</h3>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm">Score</span>
+            <span className="font-bold">
+              {feedback.oldScore} → {feedback.newScore}
+              {feedback.pointsGained > 0 && <span className="text-green-700"> (+{feedback.pointsGained})</span>}
+              {feedback.pointsGained < 0 && <span className="text-red-700"> ({feedback.pointsGained})</span>}
+            </span>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm">Tier</span>
+            <span className="font-bold">
+              {feedback.oldTier} → {feedback.newTier}
+              {tierUp && <span className="text-green-700"> ⬆️ Upgraded!</span>}
+              {tierDown && <span className="text-red-700"> ⬇️</span>}
+            </span>
+          </div>
+
+          {feedback.topicsAsked.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold">Doctor asked about:</p>
+              <p className="text-xs text-gray-600">{feedback.topicsAsked.length} topic(s) → +{feedback.topicsAsked.length * 2} score boost</p>
             </div>
-          );
-        })}
+          )}
+
+          {feedback.nextFollowup && (
+            <div>
+              <p className="text-sm">📅 Next visit: <span className="font-semibold">{feedback.nextFollowup}</span></p>
+            </div>
+          )}
+
+          {feedback.stumpQ && (
+            <div className="bg-yellow-50 p-2 rounded">
+              <p className="text-xs font-semibold">⚠️ Doctor's Question logged</p>
+              <p className="text-xs text-gray-700">"{feedback.stumpQ}"</p>
+              <p className="text-xs text-gray-500 mt-1">Admin will review and add answer.</p>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-500 mt-2">{TIER_GUIDANCE[feedback.newTier].advice}</p>
+        </div>
+
+        {feedback.topicsAsked.length > 0 && (
+          <>
+            <h3 className="font-bold text-sm">💡 Read more on what doctor asked:</h3>
+            {feedback.topicsAsked.map(tk => {
+              const t = TOPICS.find(x => x.key === tk);
+              if (!t) return null;
+              return (
+                <div key={tk} onClick={async () => {
+                  const lessons = await db.getLessonsByCategory(t.cat);
+                  if (lessons.length > 0) goto('lessonView', { lessonId: lessons[0].id });
+                  else alert('No lesson available yet for: ' + t.label);
+                }}
+                  className="bg-white p-3 rounded card-shadow cursor-pointer flex justify-between items-center">
+                  <span className="text-sm">{t.label}</span>
+                  <span className="text-xs text-purple-700">Read →</span>
+                </div>
+              );
+            })}
+          </>
+        )}
+
         <button onClick={() => goto('home')}
           className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
       </div>
@@ -920,13 +908,10 @@ function LogVisit({ user, goto, preDoctorId = null }) {
         )}
       </Field>
 
-      <Field label="Stump Question / Anything new he asked">
+      <Field label="Doctor's Question (something he asked you couldn't answer)">
         <textarea className="input" rows="2" value={form.stump_question}
           onChange={e => setForm({...form, stump_question: e.target.value})} />
       </Field>
-
-      <Field label="Notes"><textarea className="input" rows="2" value={form.notes}
-        onChange={e => setForm({...form, notes: e.target.value})} /></Field>
 
       <Field label="Next follow-up date">
         <input type="date" className="input" value={form.next_followup}
@@ -966,7 +951,6 @@ function LogVisit({ user, goto, preDoctorId = null }) {
 function Learn({ user, goto }) {
   const [lessons, setLessons] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
-
   useEffect(() => { db.getLessons().then(setLessons); }, []);
 
   if (activeCat) {
@@ -1189,7 +1173,6 @@ function Dashboard({ goto }) {
 function PendingEditsQueue({ user, goto }) {
   const [edits, setEdits] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const load = () => db.getPendingEdits().then(d => { setEdits(d); setLoading(false); });
   useEffect(() => { load(); }, []);
 
