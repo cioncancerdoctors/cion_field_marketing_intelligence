@@ -27,6 +27,8 @@
   .chip-on { background: #4B1E6B; color: white; }
   .chip-off { background: #e5e7eb; color: #374151; }
   .progress-ring { transition: stroke-dashoffset 0.35s; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .lesson-body strong { font-weight: 700; color: #4B1E6B; }
+  .lesson-body em { font-style: italic; }
 </style>
 </head>
 <body>
@@ -38,19 +40,13 @@
 // =========================================
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.6.0';
+const APP_VERSION = 'v2.7.0';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
-const DAILY_TARGET = 10; // doctor-met visits per working day
+const DAILY_TARGET = 10;
 
-// =========================================
-// SECTION 2: SUPABASE CLIENT
-// =========================================
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// =========================================
-// SECTION 3: CONSTANTS
-// =========================================
 const SPECIALTIES = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','General Surgeon','Paediatrician','Orthopaedic','Urologist','Dermatologist','Psychiatrist','Oncologist','Cardiologist','Small Hospital','Large Hospital','Diagnostic Centre','Other'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const HOURS = ['9-10 AM','10-11 AM','11-12 PM','12-1 PM','1-2 PM','2-3 PM','3-4 PM','4-5 PM','5-6 PM','6-7 PM','7-8 PM','8-9 PM'];
@@ -84,7 +80,26 @@ const TOPICS = [
 ];
 
 // =========================================
-// SECTION 4: DB HELPERS
+// MARKDOWN BOLD/ITALIC PARSER
+// =========================================
+function parseMarkdown(text) {
+  if (!text) return '';
+  // Sanitize: strip any raw HTML/script tags first
+  let safe = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  // Convert **bold**
+  safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Convert *italic* (but not if already part of **)
+  safe = safe.replace(/(^|[^*])\*([^*]+?)\*(?!\*)/g, '$1<em>$2</em>');
+  // Preserve line breaks
+  safe = safe.replace(/\n/g, '<br/>');
+  return safe;
+}
+
+// =========================================
+// DB HELPERS (same as v2.6)
 // =========================================
 const db = {
   async getReps() {
@@ -132,18 +147,13 @@ const db = {
     const { data } = await supa.from('doctors')
       .select('id, name, clinic_name, specialty')
       .ilike('name', '%' + name.trim() + '%')
-      .eq('zone_id', zoneId)
-      .eq('created_by', repId);
+      .eq('zone_id', zoneId).eq('created_by', repId);
     return data || [];
   },
   async addDoctor(doc) { return await supa.from('doctors').insert([doc]).select().single(); },
   async updateDoctor(id, updates) { return await supa.from('doctors').update(updates).eq('id', id); },
-  async closeDoctor(id, reason) {
-    return await supa.from('doctors').update({ is_closed: true, closed_reason: reason }).eq('id', id);
-  },
-  async reopenDoctor(id) {
-    return await supa.from('doctors').update({ is_closed: false, closed_reason: null }).eq('id', id);
-  },
+  async closeDoctor(id, reason) { return await supa.from('doctors').update({ is_closed: true, closed_reason: reason }).eq('id', id); },
+  async reopenDoctor(id) { return await supa.from('doctors').update({ is_closed: false, closed_reason: null }).eq('id', id); },
   async getStubDoctors(repId, isAdmin) {
     let q = supa.from('doctors').select('*, zones(name)').eq('is_stub', true);
     if (!isAdmin) q = q.eq('created_by', repId);
@@ -255,18 +265,14 @@ const db = {
     const { data: addedDocs } = await supa.from('doctors').select('id, tier').eq('created_by', repId).gte('created_at', since);
     const { data: attempts } = await supa.from('quiz_attempts').select('*').eq('rep_id', repId).gte('attempted_at', since);
     const { data: referrals } = await supa.from('referrals').select('id').eq('influenced_by_rep', repId).gte('created_at', since);
-    // Days worked (Sunday excluded)
     const workedDates = new Set();
     (visits || []).forEach(v => {
       const d = new Date(v.visited_at);
       if (d.getDay() !== 0) workedDates.add(d.toDateString());
     });
     return {
-      visits: visits || [],
-      addedDocs: addedDocs || [],
-      attempts: attempts || [],
-      referrals: referrals || [],
-      daysWorked: workedDates.size
+      visits: visits || [], addedDocs: addedDocs || [], attempts: attempts || [],
+      referrals: referrals || [], daysWorked: workedDates.size
     };
   },
   async addReferral(ref) { return await supa.from('referrals').insert([ref]).select().single(); },
@@ -292,15 +298,11 @@ const db = {
     return null;
   },
   async getCompetitorMap() {
-    // All non-null "refers_to" text + topic_asked aggregation
     const { data: docs } = await supa.from('doctors').select('refers_to, specialty, zones(name)').not('refers_to','is',null).neq('refers_to','');
     return docs || [];
   }
 };
 
-// =========================================
-// SECTION 5: SCORING
-// =========================================
 const scoring = {
   calculate(doc, lastVisit = null) {
     let interest = 0, load = 0, fit = 0, warmth = 0, topics = 0;
@@ -324,9 +326,6 @@ const scoring = {
   }
 };
 
-// =========================================
-// SECTION 6: OFFLINE QUEUE + LOCAL CACHE
-// =========================================
 const queue = {
   key: 'cion_offline_queue',
   add(item) {
@@ -353,34 +352,96 @@ const queue = {
   }
 };
 
-// Offline doctor cache for viewing when offline
-const localCache = {
-  saveDoctors(repId, docs) {
-    try { localStorage.setItem('cion_doctors_' + repId, JSON.stringify({ ts: Date.now(), data: docs })); } catch {}
-  },
-  getDoctors(repId) {
+// =========================================
+// AUTH STORAGE (Remember Me)
+// =========================================
+const auth = {
+  getUser() {
+    // Try localStorage first (remember me), then sessionStorage
     try {
-      const raw = localStorage.getItem('cion_doctors_' + repId);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed.data || null;
-    } catch { return null; }
-  }
+      const l = localStorage.getItem('cion_user');
+      if (l) return JSON.parse(l);
+      const s = sessionStorage.getItem('cion_user');
+      if (s) return JSON.parse(s);
+    } catch {}
+    return null;
+  },
+  setUser(user, remember = false) {
+    // Clear both first
+    localStorage.removeItem('cion_user');
+    sessionStorage.removeItem('cion_user');
+    const val = JSON.stringify(user);
+    if (remember) {
+      localStorage.setItem('cion_user', val);
+      localStorage.setItem('cion_remember', '1');
+    } else {
+      sessionStorage.setItem('cion_user', val);
+      localStorage.removeItem('cion_remember');
+    }
+    localStorage.setItem('cion_last_name', user.name);
+  },
+  clear() {
+    localStorage.removeItem('cion_user');
+    sessionStorage.removeItem('cion_user');
+    localStorage.removeItem('cion_remember');
+  },
+  isRemembered() { return localStorage.getItem('cion_remember') === '1'; }
 };
 
-// =========================================
-// SECTION 7: APP
-// =========================================
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
+// =========================================
+// HISTORY STACK MANAGEMENT
+// =========================================
+function useHistoryStack(initialScreen = 'home') {
+  const [stack, setStack] = useState([{ screen: initialScreen, params: {} }]);
+  const poppingRef = useRef(false);
+
+  const push = useCallback((screen, params = {}) => {
+    setStack(prev => [...prev, { screen, params }]);
+    window.history.pushState({ screen, params, len: stack.length + 1 }, '', '');
+  }, [stack.length]);
+
+  const pop = useCallback(() => {
+    setStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  }, []);
+
+  const replace = useCallback((screen, params = {}) => {
+    setStack([{ screen, params }]);
+    window.history.replaceState({ screen, params, len: 1 }, '', '');
+  }, []);
+
+  // Browser/OS back button handler
+  useEffect(() => {
+    const onPop = (e) => {
+      if (poppingRef.current) { poppingRef.current = false; return; }
+      if (stack.length > 1) {
+        pop();
+      } else {
+        // At root — confirm exit
+        const leave = confirm('Exit the app?');
+        if (!leave) {
+          poppingRef.current = true;
+          window.history.pushState({ screen: 'home', params: {}, len: 1 }, '', '');
+        }
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [stack.length, pop]);
+
+  const current = stack[stack.length - 1];
+  return { current, push, pop, replace, stack };
+}
+
+// =========================================
+// APP
+// =========================================
 function App() {
-  const [currentUser, setCurrentUser] = useState(() => {
-    try { return JSON.parse(sessionStorage.getItem('cion_user') || 'null'); } catch { return null; }
-  });
-  const [screen, setScreen] = useState('home');
-  const [screenParams, setScreenParams] = useState({});
+  const [currentUser, setCurrentUser] = useState(() => auth.getUser());
   const [online, setOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(queue.all().length);
+  const history = useHistoryStack('home');
 
   useEffect(() => {
     const onOnline = async () => {
@@ -398,41 +459,58 @@ function App() {
     };
   }, []);
 
-  const handleLogin = (rep) => {
+  // Initial history state push
+  useEffect(() => {
+    if (!window.history.state) {
+      window.history.replaceState({ screen: 'home', params: {}, len: 1 }, '', '');
+    }
+  }, []);
+
+  const handleLogin = (rep, remember) => {
     setCurrentUser(rep);
-    sessionStorage.setItem('cion_user', JSON.stringify(rep));
-    localStorage.setItem('cion_last_name', rep.name);
+    auth.setUser(rep, remember);
+    history.replace('home');
   };
   const handleLogout = () => {
     if (!confirm('Logout?')) return;
     setCurrentUser(null);
-    sessionStorage.removeItem('cion_user');
-    setScreen('home');
+    auth.clear();
+    history.replace('home');
   };
-  const goto = (s, params = {}) => { setScreen(s); setScreenParams(params); };
+  const goto = (s, params = {}) => history.push(s, params);
+  const goBack = () => {
+    if (history.stack.length > 1) {
+      history.pop();
+      window.history.back();
+    } else {
+      goto('home');
+    }
+  };
 
   if (!currentUser) return <Login onLogin={handleLogin} />;
   const isAdmin = currentUser.role === 'admin';
+  const screen = history.current.screen;
+  const screenParams = history.current.params;
 
   return (
     <div className="min-h-screen pb-20">
       <Header user={currentUser} online={online} pendingCount={pendingCount} onLogout={handleLogout} />
       <main className="p-4 max-w-lg mx-auto">
         {screen === 'home' && (isAdmin ? <AdminHome user={currentUser} goto={goto} /> : <RepHome user={currentUser} goto={goto} />)}
-        {screen === 'doctors' && <DoctorList user={currentUser} goto={goto} />}
-        {screen === 'doctorDetail' && <DoctorDetail user={currentUser} goto={goto} doctorId={screenParams.doctorId} />}
-        {screen === 'addDoctor' && <DoctorForm user={currentUser} goto={goto} />}
-        {screen === 'editDoctor' && <DoctorForm user={currentUser} goto={goto} doctorId={screenParams.doctorId} />}
-        {screen === 'logVisit' && <LogVisit user={currentUser} goto={goto} preDoctorId={screenParams.doctorId} />}
-        {screen === 'editVisit' && <EditVisit user={currentUser} goto={goto} visitId={screenParams.visitId} />}
+        {screen === 'doctors' && <DoctorList user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'doctorDetail' && <DoctorDetail user={currentUser} goto={goto} goBack={goBack} doctorId={screenParams.doctorId} />}
+        {screen === 'addDoctor' && <DoctorForm user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'editDoctor' && <DoctorForm user={currentUser} goto={goto} goBack={goBack} doctorId={screenParams.doctorId} />}
+        {screen === 'logVisit' && <LogVisit user={currentUser} goto={goto} goBack={goBack} preDoctorId={screenParams.doctorId} />}
+        {screen === 'editVisit' && <EditVisit user={currentUser} goto={goto} goBack={goBack} visitId={screenParams.visitId} />}
         {screen === 'learn' && <Learn user={currentUser} goto={goto} />}
-        {screen === 'lessonView' && <LessonView lessonId={screenParams.lessonId} user={currentUser} goto={goto} />}
-        {screen === 'quiz' && <Quiz lessonId={screenParams.lessonId} user={currentUser} goto={goto} />}
-        {screen === 'dashboard' && isAdmin && <Dashboard goto={goto} />}
-        {screen === 'repPerformance' && isAdmin && <RepPerformance goto={goto} repId={screenParams.repId} />}
-        {screen === 'pendingEdits' && isAdmin && <PendingEditsQueue user={currentUser} goto={goto} />}
-        {screen === 'addReferral' && isAdmin && <AddReferral goto={goto} />}
-        {screen === 'competitors' && isAdmin && <CompetitorMap goto={goto} />}
+        {screen === 'lessonView' && <LessonView lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'quiz' && <Quiz lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'dashboard' && isAdmin && <Dashboard goto={goto} goBack={goBack} />}
+        {screen === 'repPerformance' && isAdmin && <RepPerformance goto={goto} goBack={goBack} repId={screenParams.repId} />}
+        {screen === 'pendingEdits' && isAdmin && <PendingEditsQueue user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'addReferral' && isAdmin && <AddReferral goto={goto} goBack={goBack} />}
+        {screen === 'competitors' && isAdmin && <CompetitorMap goto={goto} goBack={goBack} />}
       </main>
       <BottomNav screen={screen} goto={goto} isAdmin={isAdmin} />
     </div>
@@ -457,10 +535,17 @@ function Header({ user, online, pendingCount, onLogout }) {
   );
 }
 
+function BackButton({ goBack }) {
+  return (
+    <button onClick={goBack} className="text-sm text-purple-700 underline">← Back</button>
+  );
+}
+
 function Login({ onLogin }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState(localStorage.getItem('cion_last_name') || '');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(auth.isRemembered());
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [foundRep, setFoundRep] = useState(null);
@@ -479,7 +564,7 @@ function Login({ onLogin }) {
   const checkPassword = () => {
     const expected = foundRep.role === 'admin' ? ADMIN_PASSWORD : REP_PASSWORD;
     if (password !== expected) { setError('Wrong password'); return; }
-    onLogin(foundRep);
+    onLogin(foundRep, remember);
   };
 
   return (
@@ -506,6 +591,11 @@ function Login({ onLogin }) {
             <input className="input text-gray-800" type="password" placeholder="Password"
               value={password} onChange={e => setPassword(e.target.value)} autoFocus
               onKeyDown={e => e.key === 'Enter' && checkPassword()} />
+            <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
+              <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
+                className="w-4 h-4" />
+              <span>Remember me on this device</span>
+            </label>
             {error && <p className="text-red-300 text-xs">{error}</p>}
             <button onClick={checkPassword}
               className="w-full bg-white text-purple-900 py-3 rounded-lg font-bold">Login</button>
@@ -543,9 +633,6 @@ function ProgressRing({ value, max, size = 80, stroke = 8 }) {
   );
 }
 
-// =========================================
-// REP HOME
-// =========================================
 function RepHome({ user, goto }) {
   const [actions, setActions] = useState([]);
   const [stats, setStats] = useState({ visits: 0, doctors: 0 });
@@ -569,7 +656,6 @@ function RepHome({ user, goto }) {
         db.getStubDoctors(user.id, false)
       ]);
       setActions(acts);
-      localCache.saveDoctors(user.id, docs);
       const thisWeek = vis.filter(v => (Date.now() - new Date(v.visited_at)) < 7 * 24 * 3600 * 1000);
       setStats({ visits: thisWeek.length, doctors: docs.length });
       setDailyLesson(lesson);
@@ -582,7 +668,6 @@ function RepHome({ user, goto }) {
 
   return (
     <div className="space-y-4">
-      {/* Daily target ring */}
       <div className="bg-white p-4 rounded-lg card-shadow flex items-center gap-4">
         <ProgressRing value={target.metCount} max={DAILY_TARGET} />
         <div className="flex-1">
@@ -614,7 +699,6 @@ function RepHome({ user, goto }) {
         ➕ Log New Visit
       </button>
 
-      {/* Pending action: complete stub doctors */}
       {stubs.length > 0 && (
         <div className="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
           <p className="text-sm font-semibold text-orange-800">⚠️ {stubs.length} doctor{stubs.length>1?'s':''} need full details</p>
@@ -627,7 +711,6 @@ function RepHome({ user, goto }) {
         </div>
       )}
 
-      {/* Daily lesson */}
       {dailyLesson && (
         <div onClick={() => goto('lessonView', { lessonId: dailyLesson.id })}
           className="bg-purple-50 border-l-4 border-purple-700 p-3 rounded cursor-pointer">
@@ -637,7 +720,6 @@ function RepHome({ user, goto }) {
         </div>
       )}
 
-      {/* Work Area view - yesterday's visits */}
       {yesterday.length > 0 && (
         <div className="bg-white rounded-lg card-shadow p-4">
           <h2 className="font-bold mb-2 cion-primary-text">🗺️ Yesterday's Work Area</h2>
@@ -665,7 +747,6 @@ function RepHome({ user, goto }) {
         </div>
       )}
 
-      {/* Today's Action List */}
       <div className="bg-white rounded-lg card-shadow p-4">
         <h2 className="font-bold mb-2 cion-primary-text">🔴 Today's Action List</h2>
         <p className="text-xs text-gray-500 mb-3">🔥 A: 3–4×/mo · ☀️ B: 1–2×/mo · ❄️ C: 1×/mo</p>
@@ -690,9 +771,6 @@ function RepHome({ user, goto }) {
   );
 }
 
-// =========================================
-// ADMIN HOME
-// =========================================
 function AdminHome({ user, goto }) {
   const [report, setReport] = useState(null);
   const [overview, setOverview] = useState(null);
@@ -701,9 +779,7 @@ function AdminHome({ user, goto }) {
   useEffect(() => {
     (async () => {
       const [r, o] = await Promise.all([db.getAdminYesterdayReport(), db.getAdminTodayOverview()]);
-      setReport(r);
-      setOverview(o);
-      setLoading(false);
+      setReport(r); setOverview(o); setLoading(false);
     })();
   }, []);
 
@@ -717,7 +793,6 @@ function AdminHome({ user, goto }) {
         <StatBox label="Doctors Met" val={report.totalMet} />
         <StatBox label="Active Reps" val={`${report.activeReps}/${report.totalReps}`} />
       </div>
-
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2 text-sm">Rep Activity Yesterday</h3>
         {report.repActivity.length === 0 ? <p className="text-xs text-gray-500">No reps</p> :
@@ -749,7 +824,6 @@ function AdminHome({ user, goto }) {
           📝 Pending Edits {overview.pendingEdits > 0 && '(' + overview.pendingEdits + ')'}
         </button>
       </div>
-
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => goto('dashboard')}
           className="bg-gray-700 text-white py-3 rounded font-bold text-sm">📈 Full Dashboard</button>
@@ -760,10 +834,7 @@ function AdminHome({ user, goto }) {
   );
 }
 
-// =========================================
-// DOCTOR LIST (with admin filters)
-// =========================================
-function DoctorList({ user, goto }) {
+function DoctorList({ user, goto, goBack }) {
   const [docs, setDocs] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -871,10 +942,7 @@ function DoctorList({ user, goto }) {
   );
 }
 
-// =========================================
-// DOCTOR DETAIL (with visit history)
-// =========================================
-function DoctorDetail({ user, goto, doctorId }) {
+function DoctorDetail({ user, goto, goBack, doctorId }) {
   const [doc, setDoc] = useState(null);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -886,15 +954,13 @@ function DoctorDetail({ user, goto, doctorId }) {
         db.getDoctorById(doctorId),
         db.getDoctorVisits(doctorId, 3, user.id, isAdmin)
       ]);
-      setDoc(d);
-      setVisits(v);
-      setLoading(false);
+      setDoc(d); setVisits(v); setLoading(false);
     })();
   }, [doctorId, user.id]);
 
   const toggleClose = async () => {
     if (!doc.is_closed) {
-      const reason = prompt('Why close this doctor? (e.g., "refused to meet", "closed clinic")');
+      const reason = prompt('Why close this doctor?');
       if (!reason) return;
       await db.closeDoctor(doctorId, reason);
     } else {
@@ -910,7 +976,7 @@ function DoctorDetail({ user, goto, doctorId }) {
 
   return (
     <div className="space-y-3">
-      <button onClick={() => goto('doctors')} className="text-sm text-purple-700 underline">← Back</button>
+      <BackButton goBack={goBack} />
 
       <div className="bg-white p-4 rounded-lg card-shadow space-y-2">
         <div className="flex justify-between items-start">
@@ -925,7 +991,7 @@ function DoctorDetail({ user, goto, doctorId }) {
           </div>
         </div>
 
-        {doc.is_stub && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">⚠️ Incomplete profile — tap Edit to fill details</p>}
+        {doc.is_stub && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">⚠️ Incomplete profile — tap Edit</p>}
         {doc.is_closed && <p className="text-xs bg-red-100 text-red-700 p-2 rounded">❌ Closed: {doc.closed_reason}</p>}
 
         <div className="grid grid-cols-2 gap-2 text-xs text-gray-700 mt-2">
@@ -947,7 +1013,7 @@ function DoctorDetail({ user, goto, doctorId }) {
         </div>
         <button onClick={toggleClose}
           className="w-full bg-gray-200 text-gray-700 py-2 rounded text-xs mt-1">
-          {doc.is_closed ? 'Reopen Doctor' : 'Close (won\'t meet again)'}
+          {doc.is_closed ? 'Reopen Doctor' : 'Close (won\'t meet)'}
         </button>
       </div>
 
@@ -985,9 +1051,6 @@ function DoctorDetail({ user, goto, doctorId }) {
   );
 }
 
-// =========================================
-// CHIP GROUP
-// =========================================
 function ChipGroup({ options, value, onChange, multi = false, getLabel = null }) {
   const arr = multi ? (value || []) : value;
   const isOn = (o) => multi ? arr.includes(o) : arr === o;
@@ -1008,10 +1071,7 @@ function ChipGroup({ options, value, onChange, multi = false, getLabel = null })
   );
 }
 
-// =========================================
-// DOCTOR FORM (add/edit with duplicate check)
-// =========================================
-function DoctorForm({ user, goto, doctorId = null }) {
+function DoctorForm({ user, goto, goBack, doctorId = null }) {
   const isEdit = !!doctorId;
   const isAdmin = user.role === 'admin';
   const [zones, setZones] = useState([]);
@@ -1045,7 +1105,6 @@ function DoctorForm({ user, goto, doctorId = null }) {
     }
   }, [doctorId]);
 
-  // Check for duplicates on name/zone change
   useEffect(() => {
     if (!isEdit && form.name.length > 2 && form.zone_id) {
       db.checkDuplicateDoctor(form.name, parseInt(form.zone_id), user.id).then(setDupes);
@@ -1068,7 +1127,6 @@ function DoctorForm({ user, goto, doctorId = null }) {
       Object.keys(payload).forEach(k => {
         if (JSON.stringify(payload[k]) !== JSON.stringify(original[k])) changes[k] = payload[k];
       });
-      // If it was a stub, mark it complete now
       if (original.is_stub) changes.is_stub = false;
       if (Object.keys(changes).length === 0) { alert('No changes'); setSaving(false); return; }
 
@@ -1076,7 +1134,6 @@ function DoctorForm({ user, goto, doctorId = null }) {
         await db.updateDoctor(doctorId, changes);
         alert('Updated ✓');
       } else {
-        // Allow direct update if stub (first completion); else pending approval
         if (original.is_stub) {
           await db.updateDoctor(doctorId, changes);
           alert('Doctor details completed ✓');
@@ -1091,7 +1148,7 @@ function DoctorForm({ user, goto, doctorId = null }) {
         }
       }
       setSaving(false);
-      goto('doctors');
+      goBack();
       return;
     }
 
@@ -1104,19 +1161,20 @@ function DoctorForm({ user, goto, doctorId = null }) {
       queue.add({ type: 'doctor', data: payload });
       alert('Saved offline.');
       setSaving(false);
-      goto('doctors');
+      goBack();
       return;
     }
     const { error } = await db.addDoctor(payload);
     setSaving(false);
     if (error) { alert('Error: ' + error.message); return; }
-    goto('doctors');
+    goBack();
   };
 
   const setSvc = (k, v) => setForm({ ...form, cancer_services: { ...form.cancer_services, [k]: v }});
 
   return (
     <div className="space-y-3">
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">{isEdit ? 'Edit Doctor' : 'Add New Doctor'}</h2>
       {isEdit && !isAdmin && original && !original.is_stub &&
         <p className="text-xs bg-yellow-100 p-2 rounded">⚠️ Edits need admin approval.</p>}
@@ -1185,15 +1243,12 @@ function DoctorForm({ user, goto, doctorId = null }) {
         className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
         {saving ? 'Saving...' : (isEdit ? (isAdmin || original?.is_stub ? 'Save' : 'Submit for Approval') : 'Save Doctor')}
       </button>
-      <button onClick={() => goto('doctors')} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
+      <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
     </div>
   );
 }
 
-// =========================================
-// LOG VISIT (with quick-add doctor)
-// =========================================
-function LogVisit({ user, goto, preDoctorId = null }) {
+function LogVisit({ user, goto, goBack, preDoctorId = null }) {
   const [doctors, setDoctors] = useState([]);
   const [zones, setZones] = useState([]);
   const [zoneId, setZoneId] = useState('');
@@ -1239,22 +1294,15 @@ function LogVisit({ user, goto, preDoctorId = null }) {
   const selectedDoc = doctors.find(d => d.id === doctorId);
 
   const quickAdd = async () => {
-    if (!quickForm.name || !quickForm.specialty || !zoneId) {
-      alert('Name, specialty, zone required'); return;
-    }
+    if (!quickForm.name || !quickForm.specialty || !zoneId) { alert('Name, specialty, zone required'); return; }
     const payload = {
-      name: quickForm.name,
-      specialty: quickForm.specialty,
-      zone_id: parseInt(zoneId),
-      created_by: user.id,
-      score: 0,
-      tier: 'C',
-      is_stub: true,
+      name: quickForm.name, specialty: quickForm.specialty, zone_id: parseInt(zoneId),
+      created_by: user.id, score: 0, tier: 'C', is_stub: true,
       cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' }
     };
     const { data, error } = await db.addDoctor(payload);
     if (error) { alert('Error: ' + error.message); return; }
-    const updated = await loadDocs();
+    await loadDocs();
     setDoctorId(data.id);
     setShowQuickAdd(false);
     setQuickForm({ name: '', specialty: '' });
@@ -1373,6 +1421,7 @@ function LogVisit({ user, goto, preDoctorId = null }) {
 
   return (
     <div className="space-y-3">
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Log Visit</h2>
 
       <Field label="Area / Zone *">
@@ -1481,21 +1530,18 @@ function LogVisit({ user, goto, preDoctorId = null }) {
       </div>
 
       {gps && <p className="text-xs text-gray-500">📍 GPS captured</p>}
-      {!gps && <p className="text-xs text-orange-600">📍 GPS not captured — enable location for best tracking</p>}
+      {!gps && <p className="text-xs text-orange-600">📍 GPS not captured — enable location</p>}
 
       <button onClick={submit} disabled={saving}
         className="w-full cion-accent text-white py-4 rounded-lg font-bold text-lg disabled:opacity-50">
         {saving ? 'Saving...' : 'Submit Visit ✓'}
       </button>
-      <button onClick={() => goto('home')} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
+      <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
     </div>
   );
 }
 
-// =========================================
-// EDIT VISIT (within 24h)
-// =========================================
-function EditVisit({ user, goto, visitId }) {
+function EditVisit({ user, goto, goBack, visitId }) {
   const [visit, setVisit] = useState(null);
   const [doc, setDoc] = useState(null);
   const [form, setForm] = useState(null);
@@ -1504,10 +1550,10 @@ function EditVisit({ user, goto, visitId }) {
   useEffect(() => {
     (async () => {
       const v = await db.getVisitById(visitId);
-      if (!v) { alert('Visit not found'); goto('home'); return; }
-      if (v.rep_id !== user.id) { alert('Not your visit'); goto('home'); return; }
+      if (!v) { alert('Visit not found'); goBack(); return; }
+      if (v.rep_id !== user.id) { alert('Not your visit'); goBack(); return; }
       const ageHrs = (Date.now() - new Date(v.visited_at)) / (3600 * 1000);
-      if (ageHrs > 24) { alert('Edit window expired (24h)'); goto('home'); return; }
+      if (ageHrs > 24) { alert('Edit window expired (24h)'); goBack(); return; }
       setVisit(v);
       setForm({
         met_status: v.met_status || '', time_spent: v.time_spent || '',
@@ -1530,7 +1576,6 @@ function EditVisit({ user, goto, visitId }) {
       next_followup: form.next_followup || null,
       edit_count: (visit.edit_count || 0) + 1
     });
-    // Recalculate score
     if (doc) {
       const newScore = scoring.calculate(doc, { ...visit, ...form });
       const newTier = scoring.tier(newScore);
@@ -1538,13 +1583,14 @@ function EditVisit({ user, goto, visitId }) {
     }
     setSaving(false);
     alert('Visit updated ✓');
-    goto('doctorDetail', { doctorId: visit.doctor_id });
+    goBack();
   };
 
   if (!form) return <p>Loading...</p>;
 
   return (
     <div className="space-y-3">
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Edit Visit</h2>
       <p className="text-xs text-gray-500">{doc?.name} · {new Date(visit.visited_at).toLocaleString()}</p>
       {visit.edit_count > 0 && <p className="text-xs text-orange-600">Previously edited {visit.edit_count}x</p>}
@@ -1585,15 +1631,11 @@ function EditVisit({ user, goto, visitId }) {
         className="w-full cion-primary text-white py-3 rounded font-bold disabled:opacity-50">
         {saving ? 'Saving...' : 'Save Changes'}
       </button>
-      <button onClick={() => goto('doctorDetail', { doctorId: visit.doctor_id })}
-        className="w-full bg-gray-300 py-2 rounded">Cancel</button>
+      <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
     </div>
   );
 }
 
-// =========================================
-// LEARN / LESSON / QUIZ (unchanged)
-// =========================================
 function Learn({ user, goto }) {
   const [lessons, setLessons] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
@@ -1638,23 +1680,24 @@ function Learn({ user, goto }) {
   );
 }
 
-function LessonView({ lessonId, user, goto }) {
+function LessonView({ lessonId, user, goto, goBack }) {
   const [lesson, setLesson] = useState(null);
   useEffect(() => { db.getLessons().then(all => setLesson(all.find(l => l.id === lessonId))); }, [lessonId]);
   if (!lesson) return <p>Loading...</p>;
   return (
     <div className="space-y-4">
-      <button onClick={() => goto('learn')} className="text-sm text-purple-700 underline">← Back</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-xl cion-primary-text">{lesson.title}</h2>
       <p className="text-xs text-gray-500">{lesson.category}{lesson.subcategory ? ' · ' + lesson.subcategory : ''}</p>
-      <div className="bg-white p-4 rounded card-shadow whitespace-pre-line text-sm leading-relaxed">{lesson.body}</div>
+      <div className="bg-white p-4 rounded card-shadow text-sm leading-relaxed lesson-body"
+        dangerouslySetInnerHTML={{ __html: parseMarkdown(lesson.body) }}></div>
       <button onClick={() => goto('quiz', { lessonId: lesson.id })}
         className="w-full cion-accent text-white py-3 rounded-lg font-bold">Take Quiz (10 MCQs)</button>
     </div>
   );
 }
 
-function Quiz({ lessonId, user, goto }) {
+function Quiz({ lessonId, user, goto, goBack }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
@@ -1675,7 +1718,7 @@ function Quiz({ lessonId, user, goto }) {
 
   if (questions.length === 0) return (
     <div className="space-y-3">
-      <button onClick={() => goto('learn')} className="text-sm text-purple-700 underline">← Back</button>
+      <BackButton goBack={goBack} />
       <p className="text-gray-500">No quiz yet.</p>
     </div>
   );
@@ -1701,13 +1744,14 @@ function Quiz({ lessonId, user, goto }) {
             </div>
           );
         })}
-        <button onClick={() => goto('learn')} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
+        <button onClick={goBack} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Quiz</h2>
       {questions.map((q, i) => (
         <div key={q.id} className="bg-white p-3 rounded card-shadow">
@@ -1727,10 +1771,7 @@ function Quiz({ lessonId, user, goto }) {
   );
 }
 
-// =========================================
-// DASHBOARD + REP PERFORMANCE + COMPETITORS
-// =========================================
-function Dashboard({ goto }) {
+function Dashboard({ goto, goBack }) {
   const [stats, setStats] = useState(null);
   useEffect(() => { db.getDashboardStats().then(setStats); }, []);
   if (!stats) return <p>Loading...</p>;
@@ -1750,7 +1791,7 @@ function Dashboard({ goto }) {
 
   return (
     <div className="space-y-4">
-      <button onClick={() => goto('home')} className="text-sm text-purple-700 underline">← Home</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Full Dashboard</h2>
 
       <div className="grid grid-cols-3 gap-2">
@@ -1795,7 +1836,7 @@ function Dashboard({ goto }) {
   );
 }
 
-function RepPerformance({ goto, repId }) {
+function RepPerformance({ goto, goBack, repId }) {
   const [data, setData] = useState(null);
   const [repName, setRepName] = useState('');
   const [days, setDays] = useState(7);
@@ -1830,7 +1871,7 @@ function RepPerformance({ goto, repId }) {
 
   return (
     <div className="space-y-4">
-      <button onClick={() => goto('dashboard')} className="text-sm text-purple-700 underline">← Dashboard</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">{repName} — Performance</h2>
 
       <ChipGroup options={[7, 14, 30]} value={days} onChange={setDays}
@@ -1885,7 +1926,7 @@ function RepPerformance({ goto, repId }) {
   );
 }
 
-function PendingEditsQueue({ user, goto }) {
+function PendingEditsQueue({ user, goto, goBack }) {
   const [edits, setEdits] = useState([]);
   const [loading, setLoading] = useState(true);
   const load = () => db.getPendingEdits().then(d => { setEdits(d); setLoading(false); });
@@ -1904,7 +1945,7 @@ function PendingEditsQueue({ user, goto }) {
 
   return (
     <div className="space-y-3">
-      <button onClick={() => goto('home')} className="text-sm text-purple-700 underline">← Home</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Pending Edits</h2>
       {loading ? <p>Loading...</p> :
        edits.length === 0 ? <p className="text-gray-500">No pending edits.</p> :
@@ -1924,7 +1965,7 @@ function PendingEditsQueue({ user, goto }) {
   );
 }
 
-function AddReferral({ goto }) {
+function AddReferral({ goto, goBack }) {
   const [doctors, setDoctors] = useState([]);
   const [reps, setReps] = useState([]);
   const [zones, setZones] = useState([]);
@@ -1950,12 +1991,12 @@ function AddReferral({ goto }) {
     setSaving(false);
     if (error) { alert('Error: ' + error.message); return; }
     alert('Referral logged ✓');
-    goto('home');
+    goBack();
   };
 
   return (
     <div className="space-y-3">
-      <button onClick={() => goto('home')} className="text-sm text-purple-700 underline">← Home</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Log Referral</h2>
       <Field label="Patient Name *"><input className="input" value={form.patient_name}
         onChange={e => setForm({...form, patient_name: e.target.value})} /></Field>
@@ -1990,15 +2031,12 @@ function AddReferral({ goto }) {
   );
 }
 
-function CompetitorMap({ goto }) {
+function CompetitorMap({ goto, goBack }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    db.getCompetitorMap().then(d => { setData(d); setLoading(false); });
-  }, []);
+  useEffect(() => { db.getCompetitorMap().then(d => { setData(d); setLoading(false); }); }, []);
 
-  // Aggregate
   const aggregated = {};
   data.forEach(d => {
     const key = (d.refers_to || '').trim().toLowerCase();
@@ -2012,11 +2050,11 @@ function CompetitorMap({ goto }) {
 
   return (
     <div className="space-y-3">
-      <button onClick={() => goto('home')} className="text-sm text-purple-700 underline">← Home</button>
+      <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">🧭 Competitor Map</h2>
-      <p className="text-xs text-gray-500">Where doctors currently refer cancer cases (aggregated from "Refers To" field)</p>
+      <p className="text-xs text-gray-500">Where doctors currently refer cancer cases</p>
       {loading ? <p>Loading...</p> :
-       sorted.length === 0 ? <p className="text-gray-500">No competitor data yet — data appears as reps fill "Refers To" field on doctors.</p> :
+       sorted.length === 0 ? <p className="text-gray-500">No competitor data yet.</p> :
        sorted.map((c, i) => (
         <div key={i} className="bg-white p-3 rounded card-shadow">
           <div className="flex justify-between">
@@ -2070,11 +2108,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 
 <script>
-// Service worker registration with auto-reload on update
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
-      // Auto-reload once when a new SW takes control
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (refreshing) return;
