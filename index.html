@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -35,12 +35,9 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-// =========================================
-// SECTION 1: CONFIG
-// =========================================
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.7.0';
+const APP_VERSION = 'v2.7.3';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
@@ -51,56 +48,79 @@ const SPECIALTIES = ['GP','Physician','Dentist','Maxillofacial','ENT','Gynae','G
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const HOURS = ['9-10 AM','10-11 AM','11-12 PM','12-1 PM','1-2 PM','2-3 PM','3-4 PM','4-5 PM','5-6 PM','6-7 PM','7-8 PM','8-9 PM'];
 const TIER_GUIDANCE = {
-  A: { emoji: 'ðŸ”¥', label: 'Hot Lead', advice: 'Meet 3â€“4 times a month' },
-  B: { emoji: 'â˜€ï¸', label: 'Warm', advice: 'Meet 1â€“2 times a month' },
-  C: { emoji: 'â„ï¸', label: 'Cold', advice: 'Meet once a month' }
+  A: { label: 'Hot Lead', advice: 'Meet 3-4 times a month' },
+  B: { label: 'Warm', advice: 'Meet 1-2 times a month' },
+  C: { label: 'Cold', advice: 'Meet once a month' }
 };
 const LEARNING_CATEGORIES = [
-  { key: 'basics', name: 'Cancer Basics', icon: 'ðŸ“š' },
-  { key: 'types', name: 'Cancer Types', icon: 'ðŸ§¬' },
-  { key: 'treatments', name: 'Cancer Treatments', icon: 'ðŸ’Š' },
-  { key: 'cion_services', name: 'CION Services', icon: 'ðŸ¥' },
-  { key: 'cion_doctors', name: 'CION Doctors', icon: 'ðŸ‘¨â€âš•ï¸' },
-  { key: 'biopsy', name: 'Types of Biopsies', icon: 'ðŸ”¬' },
-  { key: 'chemo', name: 'Chemotherapy Types', icon: 'ðŸ’‰' },
-  { key: 'surgery', name: 'Cancer Surgeries', icon: 'âš•ï¸' },
-  { key: 'radiation', name: 'Radiation Types', icon: 'â˜¢ï¸' },
-  { key: 'protocols', name: 'Cancer Protocols', icon: 'ðŸ“‹' },
-  { key: 'network', name: 'CION Network', icon: 'ðŸ—ºï¸' }
+  { key: 'basics', name: 'Cancer Basics', icon: 'book' },
+  { key: 'types', name: 'Cancer Types', icon: 'dna' },
+  { key: 'treatments', name: 'Cancer Treatments', icon: 'pill' },
+  { key: 'cion_services', name: 'CION Services', icon: 'hospital' },
+  { key: 'cion_doctors', name: 'CION Doctors', icon: 'doctor' },
+  { key: 'biopsy', name: 'Types of Biopsies', icon: 'lab' },
+  { key: 'chemo', name: 'Chemotherapy Types', icon: 'syringe' },
+  { key: 'surgery', name: 'Cancer Surgeries', icon: 'medical' },
+  { key: 'radiation', name: 'Radiation Types', icon: 'radiation' },
+  { key: 'protocols', name: 'Cancer Protocols', icon: 'clipboard' },
+  { key: 'network', name: 'CION Network', icon: 'map' }
 ];
 const TOPICS = [
-  { key: 'cost', label: 'ðŸ’° Cost', cat: 'cion_services' },
-  { key: 'treatment_types', label: 'ðŸ’Š Treatment types', cat: 'treatments' },
-  { key: 'doctors', label: 'ðŸ‘¨â€âš•ï¸ CION Doctors', cat: 'cion_doctors' },
-  { key: 'locations', label: 'ðŸ“ Locations', cat: 'network' },
-  { key: 'insurance', label: 'ðŸ›¡ï¸ Insurance', cat: 'cion_services' },
-  { key: 'aarogyasri', label: 'ðŸ›ï¸ Aarogyasri', cat: 'cion_services' },
-  { key: 'referral_pct', label: 'ðŸ“Š Referral %', cat: 'cion_services' },
-  { key: 'outcomes', label: 'ðŸŽ¯ Outcomes', cat: 'cion_services' }
+  { key: 'cost', label: 'Cost', cat: 'cion_services' },
+  { key: 'treatment_types', label: 'Treatment types', cat: 'treatments' },
+  { key: 'doctors', label: 'CION Doctors', cat: 'cion_doctors' },
+  { key: 'locations', label: 'Locations', cat: 'network' },
+  { key: 'insurance', label: 'Insurance', cat: 'cion_services' },
+  { key: 'aarogyasri', label: 'Aarogyasri', cat: 'cion_services' },
+  { key: 'referral_pct', label: 'Referral %', cat: 'cion_services' },
+  { key: 'outcomes', label: 'Outcomes', cat: 'cion_services' }
 ];
 
-// =========================================
-// MARKDOWN BOLD/ITALIC PARSER
-// =========================================
 function parseMarkdown(text) {
   if (!text) return '';
-  // Sanitize: strip any raw HTML/script tags first
-  let safe = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  // Convert **bold**
+  let safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // Convert *italic* (but not if already part of **)
   safe = safe.replace(/(^|[^*])\*([^*]+?)\*(?!\*)/g, '$1<em>$2</em>');
-  // Preserve line breaks
   safe = safe.replace(/\n/g, '<br/>');
   return safe;
 }
 
-// =========================================
-// DB HELPERS (same as v2.6)
-// =========================================
+function Icon({ name, size = 16, className = '' }) {
+  const s = size;
+  const stroke = 'currentColor';
+  const sw = 2;
+  const c = { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', stroke, strokeWidth: sw, strokeLinecap: 'round', strokeLinejoin: 'round', className };
+  switch (name) {
+    case 'home':       return <svg {...c}><path d="M3 12L12 3l9 9"/><path d="M5 10v10h14V10"/></svg>;
+    case 'doctor':     return <svg {...c}><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg>;
+    case 'book':       return <svg {...c}><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/><path d="M4 16a4 4 0 0 1 4-4h12"/></svg>;
+    case 'chart':      return <svg {...c}><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>;
+    case 'map':        return <svg {...c}><path d="M9 3l-6 3v15l6-3 6 3 6-3V3l-6 3z"/><path d="M9 3v15M15 6v15"/></svg>;
+    case 'pin':        return <svg {...c}><path d="M12 22s7-7 7-13a7 7 0 0 0-14 0c0 6 7 13 7 13z"/><circle cx="12" cy="9" r="2.5"/></svg>;
+    case 'calendar':   return <svg {...c}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>;
+    case 'clipboard':  return <svg {...c}><rect x="6" y="4" width="12" height="18" rx="2"/><path d="M9 4V2h6v2"/></svg>;
+    case 'lab':        return <svg {...c}><path d="M9 2v8L4 20a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-10V2"/><path d="M7 2h10"/></svg>;
+    case 'syringe':    return <svg {...c}><path d="M18 2l4 4M16 4l4 4M11 9l4 4M9 11l4 4M7 13L2 18l4 4 5-5"/></svg>;
+    case 'medical':    return <svg {...c}><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>;
+    case 'radiation':  return <svg {...c}><circle cx="12" cy="12" r="2"/><path d="M12 2a10 10 0 0 1 8.66 5L12 12zM12 22a10 10 0 0 1-8.66-5L12 12zM21 17l-9-5"/></svg>;
+    case 'dna':        return <svg {...c}><path d="M4 2c8 4 8 16 16 20M20 2c-8 4-8 16-16 20M6 6h12M6 12h12M6 18h12"/></svg>;
+    case 'pill':       return <svg {...c}><rect x="3" y="9" width="18" height="6" rx="3"/><path d="M12 9v6"/></svg>;
+    case 'hospital':   return <svg {...c}><rect x="3" y="6" width="18" height="15"/><path d="M12 10v6M9 13h6"/><path d="M9 6V3h6v3"/></svg>;
+    case 'phone':      return <svg {...c}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13 1 .35 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12 12 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
+    case 'rupee':      return <svg {...c}><path d="M6 3h12M6 8h12M6 13l9 8M6 13c5 0 8-2 8-5"/></svg>;
+    case 'clock':      return <svg {...c}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
+    case 'arrow':      return <svg {...c}><path d="M5 12h14M13 5l7 7-7 7"/></svg>;
+    case 'check':      return <svg {...c} stroke="#16a34a"><path d="M5 12l5 5L20 7"/></svg>;
+    case 'cross':      return <svg {...c} stroke="#dc2626"><path d="M6 6l12 12M18 6L6 18"/></svg>;
+    case 'people':     return <svg {...c}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>;
+    case 'warn':       return <svg {...c} stroke="#d97706"><path d="M12 2L2 22h20L12 2z"/><path d="M12 9v5M12 18h.01"/></svg>;
+    case 'lightbulb':  return <svg {...c} stroke="#ca8a04"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c1 .9 2 1.8 2 3.3h4c0-1.5 1-2.4 2-3.3A7 7 0 0 0 12 2z"/></svg>;
+    case 'flag':       return <svg {...c} stroke="#dc2626"><path d="M4 22V4h12l-2 4 2 4H4"/></svg>;
+    case 'dot-red':    return <svg {...c} stroke="none" fill="#dc2626"><circle cx="12" cy="12" r="6"/></svg>;
+    default:           return <svg {...c}><circle cx="12" cy="12" r="2"/></svg>;
+  }
+}
+
 const db = {
   async getReps() {
     const { data } = await supa.from('reps').select('*').eq('active', true).order('name');
@@ -229,8 +249,7 @@ const db = {
     return {
       totalVisits: visits.length,
       totalMet: visits.filter(v => v.met_status === 'doctor').length,
-      activeReps,
-      totalReps: (reps || []).length,
+      activeReps, totalReps: (reps || []).length,
       repActivity: Object.values(repActivity)
     };
   },
@@ -270,10 +289,7 @@ const db = {
       const d = new Date(v.visited_at);
       if (d.getDay() !== 0) workedDates.add(d.toDateString());
     });
-    return {
-      visits: visits || [], addedDocs: addedDocs || [], attempts: attempts || [],
-      referrals: referrals || [], daysWorked: workedDates.size
-    };
+    return { visits: visits || [], addedDocs: addedDocs || [], attempts: attempts || [], referrals: referrals || [], daysWorked: workedDates.size };
   },
   async addReferral(ref) { return await supa.from('referrals').insert([ref]).select().single(); },
   async getLessons() {
@@ -352,12 +368,8 @@ const queue = {
   }
 };
 
-// =========================================
-// AUTH STORAGE (Remember Me)
-// =========================================
 const auth = {
   getUser() {
-    // Try localStorage first (remember me), then sessionStorage
     try {
       const l = localStorage.getItem('cion_user');
       if (l) return JSON.parse(l);
@@ -367,7 +379,6 @@ const auth = {
     return null;
   },
   setUser(user, remember = false) {
-    // Clear both first
     localStorage.removeItem('cion_user');
     sessionStorage.removeItem('cion_user');
     const val = JSON.stringify(user);
@@ -390,17 +401,14 @@ const auth = {
 
 const { useState, useEffect, useRef, useCallback } = React;
 
-// =========================================
-// HISTORY STACK MANAGEMENT
-// =========================================
 function useHistoryStack(initialScreen = 'home') {
   const [stack, setStack] = useState([{ screen: initialScreen, params: {} }]);
   const poppingRef = useRef(false);
 
   const push = useCallback((screen, params = {}) => {
     setStack(prev => [...prev, { screen, params }]);
-    window.history.pushState({ screen, params, len: stack.length + 1 }, '', '');
-  }, [stack.length]);
+    window.history.pushState({ screen, params }, '', window.location.href);
+  }, []);
 
   const pop = useCallback(() => {
     setStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
@@ -408,21 +416,19 @@ function useHistoryStack(initialScreen = 'home') {
 
   const replace = useCallback((screen, params = {}) => {
     setStack([{ screen, params }]);
-    window.history.replaceState({ screen, params, len: 1 }, '', '');
+    window.history.replaceState({ screen, params }, '', window.location.href);
   }, []);
 
-  // Browser/OS back button handler
   useEffect(() => {
     const onPop = (e) => {
       if (poppingRef.current) { poppingRef.current = false; return; }
       if (stack.length > 1) {
         pop();
       } else {
-        // At root â€” confirm exit
         const leave = confirm('Exit the app?');
         if (!leave) {
           poppingRef.current = true;
-          window.history.pushState({ screen: 'home', params: {}, len: 1, sentinel: true }, '', window.location.href);
+          window.history.pushState({ screen: 'home', params: {}, sentinel: true }, '', window.location.href);
         } else {
           window.history.back();
         }
@@ -436,9 +442,6 @@ function useHistoryStack(initialScreen = 'home') {
   return { current, push, pop, replace, stack };
 }
 
-// =========================================
-// APP
-// =========================================
 function App() {
   const [currentUser, setCurrentUser] = useState(() => auth.getUser());
   const [online, setOnline] = useState(navigator.onLine);
@@ -461,10 +464,9 @@ function App() {
     };
   }, []);
 
-  // Initial history state push — sentinel for Android back button
   useEffect(() => {
-    window.history.replaceState({ screen: 'home', params: {}, len: 1 }, '', window.location.href);
-    window.history.pushState({ screen: 'home', params: {}, len: 1, sentinel: true }, '', window.location.href);
+    window.history.replaceState({ screen: 'home', params: {} }, '', window.location.href);
+    window.history.pushState({ screen: 'home', params: {}, sentinel: true }, '', window.location.href);
   }, []);
 
   const handleLogin = (rep, remember) => {
@@ -523,13 +525,13 @@ function Header({ user, online, pendingCount, onLogout }) {
     <header className="cion-primary text-white p-3 flex justify-between items-center sticky top-0 z-10 card-shadow">
       <div>
         <h1 className="font-bold">CION Connect <span className="text-xs opacity-60">{APP_VERSION}</span></h1>
-        <p className="text-xs opacity-80">{user.name} Â· {user.role}</p>
+        <p className="text-xs opacity-80">{user.name} | {user.role}</p>
       </div>
       <div className="flex items-center gap-2 text-xs">
-        <span className={'px-2 py-1 rounded ' + (online ? 'bg-green-500' : 'bg-red-500')}>
-          {online ? 'â—' : 'â—‹'}
+        <span className={'px-2 py-1 rounded text-white ' + (online ? 'bg-green-500' : 'bg-red-500')}>
+          {online ? 'On' : 'Off'}
         </span>
-        {pendingCount > 0 && <span className="bg-yellow-500 px-2 py-1 rounded">â³{pendingCount}</span>}
+        {pendingCount > 0 && <span className="bg-yellow-500 px-2 py-1 rounded">Pending {pendingCount}</span>}
         <button onClick={onLogout} className="underline">Logout</button>
       </div>
     </header>
@@ -537,9 +539,7 @@ function Header({ user, online, pendingCount, onLogout }) {
 }
 
 function BackButton({ goBack }) {
-  return (
-    <button onClick={goBack} className="text-sm text-purple-700 underline">â† Back</button>
-  );
+  return <button onClick={goBack} className="text-sm text-purple-700 underline">&larr; Back</button>;
 }
 
 function Login({ onLogin }) {
@@ -583,7 +583,7 @@ function Login({ onLogin }) {
             {error && <p className="text-red-300 text-xs">{error}</p>}
             <button onClick={checkName} disabled={loading}
               className="w-full bg-white text-purple-900 py-3 rounded-lg font-bold disabled:opacity-50">
-              {loading ? 'Checking...' : 'Next â†’'}
+              {loading ? 'Checking...' : 'Next'}
             </button>
           </>
         ) : (
@@ -593,15 +593,12 @@ function Login({ onLogin }) {
               value={password} onChange={e => setPassword(e.target.value)} autoFocus
               onKeyDown={e => e.key === 'Enter' && checkPassword()} />
             <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
-              <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
-                className="w-4 h-4" />
+              <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="w-4 h-4" />
               <span>Remember me on this device</span>
             </label>
             {error && <p className="text-red-300 text-xs">{error}</p>}
-            <button onClick={checkPassword}
-              className="w-full bg-white text-purple-900 py-3 rounded-lg font-bold">Login</button>
-            <button onClick={() => { setStep(1); setError(''); setPassword(''); }}
-              className="w-full text-xs underline">â† Back</button>
+            <button onClick={checkPassword} className="w-full bg-white text-purple-900 py-3 rounded-lg font-bold">Login</button>
+            <button onClick={() => { setStep(1); setError(''); setPassword(''); }} className="w-full text-xs underline">Back</button>
           </>
         )}
       </div>
@@ -611,10 +608,10 @@ function Login({ onLogin }) {
 
 function TierBadge({ tier }) {
   if (!tier) tier = 'C';
-  const cls = tier === 'A' ? 'bg-red-100 text-red-700' :
-              tier === 'B' ? 'bg-yellow-100 text-yellow-700' :
-              'bg-gray-100 text-gray-700';
-  return <span className={'text-xs px-2 py-1 rounded font-bold ' + cls}>{TIER_GUIDANCE[tier].emoji} {tier}</span>;
+  const cls = tier === 'A' ? 'bg-rose-100 text-rose-700' :
+              tier === 'B' ? 'bg-amber-100 text-amber-700' :
+              'bg-gray-200 text-gray-700';
+  return <span className={'text-xs px-2 py-1 rounded font-bold ' + cls}>{tier}</span>;
 }
 
 function ProgressRing({ value, max, size = 80, stroke = 8 }) {
@@ -642,7 +639,6 @@ function RepHome({ user, goto }) {
   const [yesterday, setYesterday] = useState([]);
   const [stubs, setStubs] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const isSunday = new Date().getDay() === 0;
 
   useEffect(() => {
@@ -674,8 +670,8 @@ function RepHome({ user, goto }) {
         <div className="flex-1">
           <p className="text-sm font-semibold cion-primary-text">Today's Target</p>
           <p className="text-xs text-gray-600">
-            {isSunday ? "It's Sunday â€” rest day ðŸŒ´" :
-             target.metCount >= DAILY_TARGET ? "ðŸŽ‰ Target crushed!" :
+            {isSunday ? "It's Sunday, rest day" :
+             target.metCount >= DAILY_TARGET ? "Target crushed!" :
              (DAILY_TARGET - target.metCount) + " more doctor-met visits to hit 10"}
           </p>
           <p className="text-xs text-gray-500 mt-1">Total visits today: {target.total}</p>
@@ -697,16 +693,16 @@ function RepHome({ user, goto }) {
 
       <button onClick={() => goto('logVisit')}
         className="w-full cion-accent text-white py-5 rounded-xl font-bold text-lg shadow-lg">
-        âž• Log New Visit
+        + Log New Visit
       </button>
 
       {stubs.length > 0 && (
         <div className="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
-          <p className="text-sm font-semibold text-orange-800">âš ï¸ {stubs.length} doctor{stubs.length>1?'s':''} need full details</p>
+          <p className="text-sm font-semibold text-orange-800">{stubs.length} doctor{stubs.length>1?'s':''} need full details</p>
           {stubs.slice(0,3).map(s => (
             <div key={s.id} onClick={() => goto('editDoctor', { doctorId: s.id })}
               className="text-xs underline text-orange-700 cursor-pointer mt-1">
-              {s.name} Â· {s.zones?.name} â€” tap to complete
+              {s.name} - {s.zones?.name} - tap to complete
             </div>
           ))}
         </div>
@@ -715,26 +711,26 @@ function RepHome({ user, goto }) {
       {dailyLesson && (
         <div onClick={() => goto('lessonView', { lessonId: dailyLesson.id })}
           className="bg-purple-50 border-l-4 border-purple-700 p-3 rounded cursor-pointer">
-          <p className="text-xs font-semibold text-purple-700">ðŸ“š TODAY'S LESSON</p>
+          <p className="text-xs font-semibold text-purple-700">TODAY'S LESSON</p>
           <p className="font-bold mt-1">{dailyLesson.title}</p>
-          <p className="text-xs text-gray-600 mt-1">{dailyLesson.category} Â· Tap to read + take quiz</p>
+          <p className="text-xs text-gray-600 mt-1">{dailyLesson.category} - tap to read + take quiz</p>
         </div>
       )}
 
       {yesterday.length > 0 && (
         <div className="bg-white rounded-lg card-shadow p-4">
-          <h2 className="font-bold mb-2 cion-primary-text">ðŸ—ºï¸ Yesterday's Work Area</h2>
+          <h2 className="font-bold mb-2 cion-primary-text">Yesterday's Work Area</h2>
           <p className="text-xs text-gray-500 mb-2">{yesterday.length} visit{yesterday.length>1?'s':''}</p>
           {yesterday.slice(0, 8).map(v => (
             <div key={v.id} className="flex justify-between items-center border-b py-1 last:border-0">
               <div>
                 <p className="text-sm font-semibold">{v.doctors?.name}</p>
                 <p className="text-xs text-gray-500">
-                  {v.gps_lat ? `ðŸ“ ${v.gps_lat.toFixed(3)}, ${v.gps_lng.toFixed(3)}` : 'No GPS'}
+                  {v.gps_lat ? `Lat ${v.gps_lat.toFixed(3)}, Lng ${v.gps_lng.toFixed(3)}` : 'No GPS'}
                 </p>
               </div>
               <span className="text-xs">
-                {v.met_status === 'doctor' ? 'âœ“' : v.met_status === 'staff' ? 'ðŸ‘¥' : 'âœ—'}
+                {v.met_status === 'doctor' ? 'Met' : v.met_status === 'staff' ? 'Staff' : 'Not met'}
               </span>
             </div>
           ))}
@@ -742,15 +738,15 @@ function RepHome({ user, goto }) {
             <a target="_blank" rel="noopener"
                href={`https://www.google.com/maps/dir/${yesterday.filter(v => v.gps_lat).map(v => v.gps_lat + ',' + v.gps_lng).join('/')}`}
                className="text-xs text-purple-700 underline mt-2 inline-block">
-               ðŸ—ºï¸ View route on Google Maps â†’
+               View route on Google Maps
             </a>
           )}
         </div>
       )}
 
       <div className="bg-white rounded-lg card-shadow p-4">
-        <h2 className="font-bold mb-2 cion-primary-text">ðŸ”´ Today's Action List</h2>
-        <p className="text-xs text-gray-500 mb-3">ðŸ”¥ A: 3â€“4Ã—/mo Â· â˜€ï¸ B: 1â€“2Ã—/mo Â· â„ï¸ C: 1Ã—/mo</p>
+        <h2 className="font-bold mb-2 cion-primary-text">Today's Action List</h2>
+        <p className="text-xs text-gray-500 mb-3">Tier A: 3-4x/mo - Tier B: 1-2x/mo - Tier C: 1x/mo</p>
         {loading ? <p className="text-sm text-gray-500">Loading...</p> :
          actions.length === 0 ? <p className="text-sm text-gray-500">No pending follow-ups.</p> :
          actions.slice(0, 8).map(a => (
@@ -759,7 +755,7 @@ function RepHome({ user, goto }) {
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <p className="font-semibold">{a.name}</p>
-                <p className="text-xs text-gray-500">{a.clinic_name} Â· {a.zones?.name}</p>
+                <p className="text-xs text-gray-500">{a.clinic_name} - {a.zones?.name}</p>
                 <p className="text-xs mt-1 text-gray-600">{TIER_GUIDANCE[a.tier || 'C'].advice}</p>
               </div>
               <TierBadge tier={a.tier} />
@@ -788,12 +784,13 @@ function AdminHome({ user, goto }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="font-bold text-lg cion-primary-text">ðŸ“Š Yesterday's Report</h2>
+      <h2 className="font-bold text-lg cion-primary-text">Yesterday's Report</h2>
       <div className="grid grid-cols-3 gap-2">
         <StatBox label="Total Visits" val={report.totalVisits} />
         <StatBox label="Doctors Met" val={report.totalMet} />
         <StatBox label="Active Reps" val={`${report.activeReps}/${report.totalReps}`} />
       </div>
+
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2 text-sm">Rep Activity Yesterday</h3>
         {report.repActivity.length === 0 ? <p className="text-xs text-gray-500">No reps</p> :
@@ -801,35 +798,35 @@ function AdminHome({ user, goto }) {
           <div key={r.name} className="flex justify-between items-center border-b py-2 last:border-0">
             <p className="text-sm">{r.name}</p>
             <div className="text-xs text-gray-600">
-              {r.visits} visits Â· {r.met} met
-              {r.visits === 0 && <span className="ml-2 text-red-600">âš ï¸ inactive</span>}
+              {r.visits} visits - {r.met} met
+              {r.visits === 0 && <span className="ml-2 text-red-600">inactive</span>}
             </div>
           </div>
          ))
         }
       </div>
 
-      <h2 className="font-bold text-lg cion-primary-text mt-4">ðŸ¥ Today's Overview</h2>
+      <h2 className="font-bold text-lg cion-primary-text mt-4">Today's Overview</h2>
       <div className="grid grid-cols-2 gap-2">
         <StatBox label="Total Doctors" val={overview.totalDoctors} />
-        <StatBox label="ðŸ”¥ Hot Leads" val={overview.hotLeads} />
-        <StatBox label="Overdue F/U" val={overview.overdueFollowups} />
+        <StatBox label="Hot Leads" val={overview.hotLeads} />
+        <StatBox label="Overdue" val={overview.overdueFollowups} />
         <StatBox label="Open Stumps" val={overview.openStumps} />
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => goto('addReferral')}
-          className="cion-accent text-white py-3 rounded font-bold text-sm">ðŸŽ¯ Log Referral</button>
+          className="cion-accent text-white py-3 rounded font-bold text-sm">Log Referral</button>
         <button onClick={() => goto('pendingEdits')}
           className="cion-primary text-white py-3 rounded font-bold text-sm">
-          ðŸ“ Pending Edits {overview.pendingEdits > 0 && '(' + overview.pendingEdits + ')'}
+          Pending Edits {overview.pendingEdits > 0 && '(' + overview.pendingEdits + ')'}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => goto('dashboard')}
-          className="bg-gray-700 text-white py-3 rounded font-bold text-sm">ðŸ“ˆ Full Dashboard</button>
+          className="bg-gray-700 text-white py-3 rounded font-bold text-sm">Full Dashboard</button>
         <button onClick={() => goto('competitors')}
-          className="bg-gray-700 text-white py-3 rounded font-bold text-sm">ðŸ§­ Competitor Map</button>
+          className="bg-gray-700 text-white py-3 rounded font-bold text-sm">Competitor Map</button>
       </div>
     </div>
   );
@@ -872,10 +869,8 @@ function DoctorList({ user, goto, goBack }) {
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
-        <input className="input flex-1" placeholder="Search..."
-          value={search} onChange={e => setSearch(e.target.value)} />
-        <button onClick={() => goto('addDoctor')}
-          className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
+        <input className="input flex-1" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
+        <button onClick={() => goto('addDoctor')} className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
       </div>
 
       {isAdmin && (
@@ -913,7 +908,7 @@ function DoctorList({ user, goto, goBack }) {
         Show closed doctors
       </label>
 
-      <p className="text-xs text-gray-500">ðŸ”¥ A: 3-4Ã—/mo Â· â˜€ï¸ B: 1-2Ã—/mo Â· â„ï¸ C: 1Ã—/mo Â· Showing {filtered.length} of {docs.length}</p>
+      <p className="text-xs text-gray-500">Showing {filtered.length} of {docs.length}</p>
 
       {loading ? <p>Loading...</p> :
        filtered.length === 0 ? <p className="text-gray-500 text-center py-8">No doctors. Tap "+ Add"</p> :
@@ -924,11 +919,11 @@ function DoctorList({ user, goto, goBack }) {
             <div className="flex-1">
               <p className="font-semibold">
                 {d.name}
-                {d.is_stub && <span className="ml-1 text-xs bg-orange-100 text-orange-700 px-1 rounded">âš ï¸ stub</span>}
+                {d.is_stub && <span className="ml-1 text-xs bg-orange-100 text-orange-700 px-1 rounded">stub</span>}
                 {d.is_closed && <span className="ml-1 text-xs bg-red-100 text-red-700 px-1 rounded">closed</span>}
               </p>
-              <p className="text-xs text-gray-500">{d.specialty} Â· {d.clinic_name}</p>
-              <p className="text-xs">{d.zones?.name} Â· â‚¹{d.op_fee || '-'}</p>
+              <p className="text-xs text-gray-500">{d.specialty} - {d.clinic_name}</p>
+              <p className="text-xs">{d.zones?.name} - Rs.{d.op_fee || '-'}</p>
               {isAdmin && <p className="text-xs text-gray-400">by {d.reps?.name}</p>}
             </div>
             <div className="text-right space-y-1">
@@ -983,7 +978,7 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
         <div className="flex justify-between items-start">
           <div>
             <h2 className="font-bold text-lg cion-primary-text">{doc.name}</h2>
-            <p className="text-sm text-gray-600">{doc.specialty} Â· {doc.clinic_name}</p>
+            <p className="text-sm text-gray-600">{doc.specialty} - {doc.clinic_name}</p>
             <p className="text-xs text-gray-500">{doc.zones?.name}</p>
           </div>
           <div className="text-right">
@@ -992,18 +987,18 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
           </div>
         </div>
 
-        {doc.is_stub && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">âš ï¸ Incomplete profile â€” tap Edit</p>}
-        {doc.is_closed && <p className="text-xs bg-red-100 text-red-700 p-2 rounded">âŒ Closed: {doc.closed_reason}</p>}
+        {doc.is_stub && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">Incomplete profile - tap Edit</p>}
+        {doc.is_closed && <p className="text-xs bg-red-100 text-red-700 p-2 rounded">CLOSED: {doc.closed_reason}</p>}
 
         <div className="grid grid-cols-2 gap-2 text-xs text-gray-700 mt-2">
-          {doc.mobile && <div>ðŸ“ž {doc.mobile}</div>}
-          {doc.op_fee && <div>ðŸ’° â‚¹{doc.op_fee}</div>}
-          {doc.waiting_room && <div>ðŸª‘ {doc.waiting_room}</div>}
-          {doc.area_class && <div>ðŸ˜ï¸ {doc.area_class}</div>}
-          {doc.next_followup && <div className="col-span-2">ðŸ“… Next: {doc.next_followup}</div>}
-          {doc.visit_days?.length > 0 && <div className="col-span-2">ðŸ“† Best: {doc.visit_days.join(', ')}</div>}
-          {doc.visit_hours?.length > 0 && <div className="col-span-2">â° {doc.visit_hours.join(', ')}</div>}
-          {doc.refers_to && <div className="col-span-2">âž¡ï¸ Refers: {doc.refers_to}</div>}
+          {doc.mobile && <div>Phone: {doc.mobile}</div>}
+          {doc.op_fee && <div>Fee: Rs.{doc.op_fee}</div>}
+          {doc.waiting_room && <div>Wait: {doc.waiting_room}</div>}
+          {doc.area_class && <div>Area: {doc.area_class}</div>}
+          {doc.next_followup && <div className="col-span-2">Next: {doc.next_followup}</div>}
+          {doc.visit_days?.length > 0 && <div className="col-span-2">Best days: {doc.visit_days.join(', ')}</div>}
+          {doc.visit_hours?.length > 0 && <div className="col-span-2">Times: {doc.visit_hours.join(', ')}</div>}
+          {doc.refers_to && <div className="col-span-2">Refers to: {doc.refers_to}</div>}
         </div>
 
         <div className="flex gap-2 mt-3">
@@ -1012,9 +1007,8 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
           <button onClick={() => goto('editDoctor', { doctorId })}
             className="flex-1 cion-primary text-white py-2 rounded font-bold text-sm">Edit</button>
         </div>
-        <button onClick={toggleClose}
-          className="w-full bg-gray-200 text-gray-700 py-2 rounded text-xs mt-1">
-          {doc.is_closed ? 'Reopen Doctor' : 'Close (won\'t meet)'}
+        <button onClick={toggleClose} className="w-full bg-gray-200 text-gray-700 py-2 rounded text-xs mt-1">
+          {doc.is_closed ? 'Reopen Doctor' : "Close (won't meet)"}
         </button>
       </div>
 
@@ -1028,11 +1022,11 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-xs text-gray-500">
-                    {new Date(v.visited_at).toLocaleDateString()} {isAdmin && `Â· ${v.reps?.name}`}
+                    {new Date(v.visited_at).toLocaleDateString()} {isAdmin && `- ${v.reps?.name}`}
                   </p>
                   <p className="text-sm">
-                    {v.met_status === 'doctor' ? 'âœ“ Met doctor' : v.met_status === 'staff' ? 'ðŸ‘¥ Staff only' : 'âœ— Not met'}
-                    {' Â· '}Interest {v.interest}/5
+                    {v.met_status === 'doctor' ? 'Met doctor' : v.met_status === 'staff' ? 'Staff only' : 'Not met'}
+                    {' - '}Interest {v.interest}/5
                   </p>
                   {v.topics_asked?.length > 0 && <p className="text-xs text-purple-700">Asked: {v.topics_asked.length} topic(s)</p>}
                   {v.stump_question && <p className="text-xs text-orange-700 italic">"{v.stump_question}"</p>}
@@ -1082,8 +1076,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     name: '', mobile: '', specialty: '', clinic_name: '', zone_id: '',
     op_fee: '', waiting_room: '', area_class: '',
     cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
-    refers_to: '',
-    visit_days: [], visit_hours: []
+    refers_to: '', visit_days: [], visit_hours: []
   });
   const [saving, setSaving] = useState(false);
 
@@ -1109,9 +1102,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
   useEffect(() => {
     if (!isEdit && form.name.length > 2 && form.zone_id) {
       db.checkDuplicateDoctor(form.name, parseInt(form.zone_id), user.id).then(setDupes);
-    } else {
-      setDupes([]);
-    }
+    } else { setDupes([]); }
   }, [form.name, form.zone_id, isEdit, user.id]);
 
   const submit = async () => {
@@ -1133,11 +1124,11 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
 
       if (isAdmin) {
         await db.updateDoctor(doctorId, changes);
-        alert('Updated âœ“');
+        alert('Updated');
       } else {
         if (original.is_stub) {
           await db.updateDoctor(doctorId, changes);
-          alert('Doctor details completed âœ“');
+          alert('Doctor details completed');
         } else {
           if (!navigator.onLine) {
             queue.add({ type: 'pending_edit', data: { doctor_id: doctorId, rep_id: user.id, changes }});
@@ -1177,46 +1168,36 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     <div className="space-y-3">
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">{isEdit ? 'Edit Doctor' : 'Add New Doctor'}</h2>
-      {isEdit && !isAdmin && original && !original.is_stub &&
-        <p className="text-xs bg-yellow-100 p-2 rounded">âš ï¸ Edits need admin approval.</p>}
-      {isEdit && original?.is_stub &&
-        <p className="text-xs bg-orange-100 p-2 rounded">âœï¸ Complete this doctor's details.</p>}
+      {isEdit && !isAdmin && original && !original.is_stub && <p className="text-xs bg-yellow-100 p-2 rounded">Edits need admin approval.</p>}
+      {isEdit && original?.is_stub && <p className="text-xs bg-orange-100 p-2 rounded">Complete this doctor's details.</p>}
 
-      <Field label="Doctor Name *"><input className="input" value={form.name}
-        onChange={e => setForm({...form, name: e.target.value})} /></Field>
+      <Field label="Doctor Name *"><input className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></Field>
 
       {dupes.length > 0 && (
         <div className="bg-yellow-100 border-l-4 border-yellow-500 p-2 rounded">
-          <p className="text-xs font-semibold text-yellow-800">âš ï¸ Possible duplicate(s):</p>
-          {dupes.map(d => <p key={d.id} className="text-xs">{d.name} Â· {d.clinic_name} Â· {d.specialty}</p>)}
+          <p className="text-xs font-semibold text-yellow-800">Possible duplicate(s):</p>
+          {dupes.map(d => <p key={d.id} className="text-xs">{d.name} - {d.clinic_name} - {d.specialty}</p>)}
         </div>
       )}
 
-      <Field label="Specialty *"><select className="input" value={form.specialty}
-        onChange={e => setForm({...form, specialty: e.target.value})}>
+      <Field label="Specialty *"><select className="input" value={form.specialty} onChange={e => setForm({...form, specialty: e.target.value})}>
         <option value="">Select...</option>
         {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
       </select></Field>
 
-      <Field label="Zone *"><select className="input" value={form.zone_id}
-        onChange={e => setForm({...form, zone_id: e.target.value})}>
+      <Field label="Zone *"><select className="input" value={form.zone_id} onChange={e => setForm({...form, zone_id: e.target.value})}>
         <option value="">Select...</option>
         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
       </select></Field>
 
-      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile}
-        onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
-      <Field label="Clinic Name"><input className="input" value={form.clinic_name}
-        onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
-      <Field label="OP Fee (â‚¹)"><input className="input" type="number" value={form.op_fee}
-        onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
+      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile} onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
+      <Field label="Clinic Name"><input className="input" value={form.clinic_name} onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
+      <Field label="OP Fee (Rs.)"><input className="input" type="number" value={form.op_fee} onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
       <Field label="Waiting Room">
-        <ChipGroup options={['Empty','Few','Steady','Packed']}
-          value={form.waiting_room} onChange={v => setForm({...form, waiting_room: v})} />
+        <ChipGroup options={['Empty','Few','Steady','Packed']} value={form.waiting_room} onChange={v => setForm({...form, waiting_room: v})} />
       </Field>
       <Field label="Area Class">
-        <ChipGroup options={['Posh','Mixed','Lower']}
-          value={form.area_class} onChange={v => setForm({...form, area_class: v})} />
+        <ChipGroup options={['Posh','Mixed','Lower']} value={form.area_class} onChange={v => setForm({...form, area_class: v})} />
       </Field>
       <Field label="Best Days"><ChipGroup options={DAYS} value={form.visit_days} multi onChange={v => setForm({...form, visit_days: v})} /></Field>
       <Field label="Best Time Slots"><ChipGroup options={HOURS} value={form.visit_hours} multi onChange={v => setForm({...form, visit_hours: v})} /></Field>
@@ -1229,19 +1210,16 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
             <span className="text-sm">{label}</span>
             <div className="flex gap-1">
               {[['in','In'],['out','Out'],['na','N/A']].map(([v,lbl]) => (
-                <span key={v} className={'chip ' + (form.cancer_services[k] === v ? 'chip-on' : 'chip-off')}
-                  onClick={() => setSvc(k, v)}>{lbl}</span>
+                <span key={v} className={'chip ' + (form.cancer_services[k] === v ? 'chip-on' : 'chip-off')} onClick={() => setSvc(k, v)}>{lbl}</span>
               ))}
             </div>
           </div>
         ))}
       </div>
 
-      <Field label="Refers To"><input className="input" value={form.refers_to}
-        onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
+      <Field label="Refers To"><input className="input" value={form.refers_to} onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
 
-      <button onClick={submit} disabled={saving}
-        className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
+      <button onClick={submit} disabled={saving} className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
         {saving ? 'Saving...' : (isEdit ? (isAdmin || original?.is_stub ? 'Save' : 'Submit for Approval') : 'Save Doctor')}
       </button>
       <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
@@ -1365,14 +1343,14 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     return (
       <div className="space-y-3">
         <div className="bg-green-100 border-l-4 border-green-600 p-4 rounded">
-          <p className="font-bold text-green-800">âœ“ Visit Logged for {feedback.doctorName}</p>
+          <p className="font-bold text-green-800">Visit Logged for {feedback.doctorName}</p>
         </div>
         <div className="bg-white p-4 rounded card-shadow space-y-3">
-          <h3 className="font-bold cion-primary-text">ðŸ“Š Visit Feedback</h3>
+          <h3 className="font-bold cion-primary-text">Visit Feedback</h3>
           <div className="flex justify-between items-center">
             <span className="text-sm">Score</span>
             <span className="font-bold">
-              {feedback.oldScore} â†’ {feedback.newScore}
+              {feedback.oldScore} -&gt; {feedback.newScore}
               {feedback.pointsGained > 0 && <span className="text-green-700"> (+{feedback.pointsGained})</span>}
               {feedback.pointsGained < 0 && <span className="text-red-700"> ({feedback.pointsGained})</span>}
             </span>
@@ -1380,18 +1358,18 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
           <div className="flex justify-between items-center">
             <span className="text-sm">Tier</span>
             <span className="font-bold">
-              {feedback.oldTier} â†’ {feedback.newTier}
-              {tierUp && <span className="text-green-700"> â¬†ï¸</span>}
-              {tierDown && <span className="text-red-700"> â¬‡ï¸</span>}
+              {feedback.oldTier} -&gt; {feedback.newTier}
+              {tierUp && <span className="text-green-700"> (upgraded)</span>}
+              {tierDown && <span className="text-red-700"> (down)</span>}
             </span>
           </div>
           {feedback.topicsAsked.length > 0 && (
-            <p className="text-xs text-gray-600">Doctor asked {feedback.topicsAsked.length} topic(s) â†’ +{feedback.topicsAsked.length * 2} boost</p>
+            <p className="text-xs text-gray-600">Doctor asked {feedback.topicsAsked.length} topic(s) - +{feedback.topicsAsked.length * 2} boost</p>
           )}
-          {feedback.nextFollowup && <p className="text-sm">ðŸ“… Next: {feedback.nextFollowup}</p>}
+          {feedback.nextFollowup && <p className="text-sm">Next: {feedback.nextFollowup}</p>}
           {feedback.stumpQ && (
             <div className="bg-yellow-50 p-2 rounded">
-              <p className="text-xs font-semibold">âš ï¸ Doctor's Question logged</p>
+              <p className="text-xs font-semibold">Doctor's Question logged</p>
               <p className="text-xs italic">"{feedback.stumpQ}"</p>
             </div>
           )}
@@ -1399,7 +1377,7 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
         </div>
         {feedback.topicsAsked.length > 0 && (
           <>
-            <h3 className="font-bold text-sm">ðŸ’¡ Read more:</h3>
+            <h3 className="font-bold text-sm">Read more:</h3>
             {feedback.topicsAsked.map(tk => {
               const t = TOPICS.find(x => x.key === tk);
               if (!t) return null;
@@ -1409,7 +1387,7 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
                   if (lessons.length > 0) goto('lessonView', { lessonId: lessons[0].id });
                 }} className="bg-white p-3 rounded card-shadow cursor-pointer flex justify-between items-center">
                   <span className="text-sm">{t.label}</span>
-                  <span className="text-xs text-purple-700">Read â†’</span>
+                  <span className="text-xs text-purple-700">Read</span>
                 </div>
               );
             })}
@@ -1435,19 +1413,16 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       <Field label="Doctor *">
         <select className="input" value={doctorId} onChange={e => setDoctorId(e.target.value)} disabled={!zoneId}>
           <option value="">{zoneId ? 'Select doctor...' : 'Select area first'}</option>
-          {filteredDoctors.map(d => <option key={d.id} value={d.id}>{d.name} â€” {d.clinic_name || '(no clinic)'}</option>)}
+          {filteredDoctors.map(d => <option key={d.id} value={d.id}>{d.name} - {d.clinic_name || '(no clinic)'}</option>)}
         </select>
         {zoneId && !showQuickAdd && (
-          <button onClick={() => setShowQuickAdd(true)}
-            className="text-xs text-purple-700 underline mt-1">+ Quick-add new doctor in this zone</button>
+          <button onClick={() => setShowQuickAdd(true)} className="text-xs text-purple-700 underline mt-1">+ Quick-add new doctor in this zone</button>
         )}
         {showQuickAdd && (
           <div className="bg-orange-50 p-3 rounded mt-2 space-y-2">
             <p className="text-xs font-semibold">Quick-add (full details can be completed later)</p>
-            <input className="input" placeholder="Doctor name" value={quickForm.name}
-              onChange={e => setQuickForm({...quickForm, name: e.target.value})} />
-            <select className="input" value={quickForm.specialty}
-              onChange={e => setQuickForm({...quickForm, specialty: e.target.value})}>
+            <input className="input" placeholder="Doctor name" value={quickForm.name} onChange={e => setQuickForm({...quickForm, name: e.target.value})} />
+            <select className="input" value={quickForm.specialty} onChange={e => setQuickForm({...quickForm, specialty: e.target.value})}>
               <option value="">Specialty...</option>
               {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
             </select>
@@ -1470,8 +1445,7 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       </Field>
 
       <Field label={'Interest: ' + form.interest + '/5'}>
-        <input type="range" min="1" max="5" value={form.interest} className="w-full"
-          onChange={e => setForm({...form, interest: e.target.value})} />
+        <input type="range" min="1" max="5" value={form.interest} className="w-full" onChange={e => setForm({...form, interest: e.target.value})} />
       </Field>
 
       <Field label="Referral likely?">
@@ -1485,26 +1459,22 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
           onChange={v => setForm({...form, phone_status: v === 'Already on file' ? 'on_file' : v === 'Got today' ? 'got_today' : 'not_given'})} />
         {form.phone_status === 'got_today' && (
           <input className="input mt-2" type="tel" maxLength="10" placeholder="10-digit"
-            value={form.phone_captured}
-            onChange={e => setForm({...form, phone_captured: e.target.value.replace(/\D/g,'')})} />
+            value={form.phone_captured} onChange={e => setForm({...form, phone_captured: e.target.value.replace(/\D/g,'')})} />
         )}
       </Field>
 
       <Field label="Suspicious cancer cases per month">
-        <ChipGroup options={['1-2','3-5','more','quarterly','rarely']}
-          value={form.suspicious_cases} onChange={v => setForm({...form, suspicious_cases: v})} />
+        <ChipGroup options={['1-2','3-5','more','quarterly','rarely']} value={form.suspicious_cases} onChange={v => setForm({...form, suspicious_cases: v})} />
       </Field>
 
       <Field label="What did the doctor ask about?">
-        <ChipGroup options={TOPICS.map(t => t.key)}
-          getLabel={k => TOPICS.find(t => t.key === k)?.label || k} multi
-          value={form.topics_asked} onChange={v => setForm({...form, topics_asked: v})} />
+        <ChipGroup options={TOPICS.map(t => t.key)} getLabel={k => TOPICS.find(t => t.key === k)?.label || k}
+          multi value={form.topics_asked} onChange={v => setForm({...form, topics_asked: v})} />
         {form.topics_asked.length > 0 && <p className="text-xs text-purple-700 mt-1">+{form.topics_asked.length * 2} score</p>}
       </Field>
 
       <Field label="Doctor's Question (couldn't answer)">
-        <textarea className="input" rows="2" value={form.stump_question}
-          onChange={e => setForm({...form, stump_question: e.target.value})} />
+        <textarea className="input" rows="2" value={form.stump_question} onChange={e => setForm({...form, stump_question: e.target.value})} />
       </Field>
 
       <Field label="Next follow-up date">
@@ -1516,8 +1486,7 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
 
       <div className="bg-white p-3 rounded card-shadow">
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.update_visit_time}
-            onChange={e => setForm({...form, update_visit_time: e.target.checked})} />
+          <input type="checkbox" checked={form.update_visit_time} onChange={e => setForm({...form, update_visit_time: e.target.checked})} />
           Update best visit time?
         </label>
         {form.update_visit_time && (
@@ -1530,12 +1499,11 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
         )}
       </div>
 
-      {gps && <p className="text-xs text-gray-500">ðŸ“ GPS captured</p>}
-      {!gps && <p className="text-xs text-orange-600">ðŸ“ GPS not captured â€” enable location</p>}
+      {gps && <p className="text-xs text-gray-500">GPS captured</p>}
+      {!gps && <p className="text-xs text-orange-600">GPS not captured - enable location</p>}
 
-      <button onClick={submit} disabled={saving}
-        className="w-full cion-accent text-white py-4 rounded-lg font-bold text-lg disabled:opacity-50">
-        {saving ? 'Saving...' : 'Submit Visit âœ“'}
+      <button onClick={submit} disabled={saving} className="w-full cion-accent text-white py-4 rounded-lg font-bold text-lg disabled:opacity-50">
+        {saving ? 'Saving...' : 'Submit Visit'}
       </button>
       <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
     </div>
@@ -1583,7 +1551,7 @@ function EditVisit({ user, goto, goBack, visitId }) {
       await db.updateDoctor(doc.id, { score: newScore, tier: newTier, next_followup: form.next_followup || null });
     }
     setSaving(false);
-    alert('Visit updated âœ“');
+    alert('Visit updated');
     goBack();
   };
 
@@ -1593,7 +1561,7 @@ function EditVisit({ user, goto, goBack, visitId }) {
     <div className="space-y-3">
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Edit Visit</h2>
-      <p className="text-xs text-gray-500">{doc?.name} Â· {new Date(visit.visited_at).toLocaleString()}</p>
+      <p className="text-xs text-gray-500">{doc?.name} - {new Date(visit.visited_at).toLocaleString()}</p>
       {visit.edit_count > 0 && <p className="text-xs text-orange-600">Previously edited {visit.edit_count}x</p>}
 
       <Field label="Met status">
@@ -1605,31 +1573,26 @@ function EditVisit({ user, goto, goBack, visitId }) {
         <ChipGroup options={['2min','5min','10min+']} value={form.time_spent} onChange={v => setForm({...form, time_spent: v})} />
       </Field>
       <Field label={'Interest: ' + form.interest + '/5'}>
-        <input type="range" min="1" max="5" value={form.interest} className="w-full"
-          onChange={e => setForm({...form, interest: e.target.value})} />
+        <input type="range" min="1" max="5" value={form.interest} className="w-full" onChange={e => setForm({...form, interest: e.target.value})} />
       </Field>
       <Field label="Referral likely?">
         <ChipGroup options={['yes','maybe','no']} value={form.referral_likely} onChange={v => setForm({...form, referral_likely: v})} />
       </Field>
       <Field label="Suspicious cases/month">
-        <ChipGroup options={['1-2','3-5','more','quarterly','rarely']}
-          value={form.suspicious_cases} onChange={v => setForm({...form, suspicious_cases: v})} />
+        <ChipGroup options={['1-2','3-5','more','quarterly','rarely']} value={form.suspicious_cases} onChange={v => setForm({...form, suspicious_cases: v})} />
       </Field>
       <Field label="Topics asked">
         <ChipGroup options={TOPICS.map(t => t.key)} getLabel={k => TOPICS.find(t => t.key === k)?.label || k}
           multi value={form.topics_asked} onChange={v => setForm({...form, topics_asked: v})} />
       </Field>
       <Field label="Doctor's Question">
-        <textarea className="input" rows="2" value={form.stump_question}
-          onChange={e => setForm({...form, stump_question: e.target.value})} />
+        <textarea className="input" rows="2" value={form.stump_question} onChange={e => setForm({...form, stump_question: e.target.value})} />
       </Field>
       <Field label="Next follow-up">
-        <input type="date" className="input" value={form.next_followup}
-          onChange={e => setForm({...form, next_followup: e.target.value})} />
+        <input type="date" className="input" value={form.next_followup} onChange={e => setForm({...form, next_followup: e.target.value})} />
       </Field>
 
-      <button onClick={save} disabled={saving}
-        className="w-full cion-primary text-white py-3 rounded font-bold disabled:opacity-50">
+      <button onClick={save} disabled={saving} className="w-full cion-primary text-white py-3 rounded font-bold disabled:opacity-50">
         {saving ? 'Saving...' : 'Save Changes'}
       </button>
       <button onClick={goBack} className="w-full bg-gray-300 py-2 rounded">Cancel</button>
@@ -1646,7 +1609,7 @@ function Learn({ user, goto }) {
     const filtered = lessons.filter(l => l.category === activeCat);
     return (
       <div className="space-y-3">
-        <button onClick={() => setActiveCat(null)} className="text-sm text-purple-700 underline">â† Back</button>
+        <button onClick={() => setActiveCat(null)} className="text-sm text-purple-700 underline">&larr; Back</button>
         <h2 className="font-bold text-lg cion-primary-text">{LEARNING_CATEGORIES.find(c => c.key === activeCat)?.name}</h2>
         {filtered.length === 0 ? <p className="text-gray-500">No lessons.</p> :
          filtered.map(l => (
@@ -1669,9 +1632,9 @@ function Learn({ user, goto }) {
           const count = lessons.filter(l => l.category === c.key).length;
           return (
             <div key={c.key} onClick={() => setActiveCat(c.key)}
-              className="bg-white p-4 rounded card-shadow cursor-pointer text-center">
-              <p className="text-3xl">{c.icon}</p>
-              <p className="font-semibold text-sm mt-1">{c.name}</p>
+              className="bg-white p-4 rounded card-shadow cursor-pointer text-center cion-primary-text">
+              <div className="flex justify-center mb-1"><Icon name={c.icon} size={32} /></div>
+              <p className="font-semibold text-sm mt-1 text-gray-800">{c.name}</p>
               <p className="text-xs text-gray-500">{count} lesson{count !== 1 ? 's' : ''}</p>
             </div>
           );
@@ -1689,7 +1652,7 @@ function LessonView({ lessonId, user, goto, goBack }) {
     <div className="space-y-4">
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-xl cion-primary-text">{lesson.title}</h2>
-      <p className="text-xs text-gray-500">{lesson.category}{lesson.subcategory ? ' Â· ' + lesson.subcategory : ''}</p>
+      <p className="text-xs text-gray-500">{lesson.category}{lesson.subcategory ? ' - ' + lesson.subcategory : ''}</p>
       <div className="bg-white p-4 rounded card-shadow text-sm leading-relaxed lesson-body"
         dangerouslySetInnerHTML={{ __html: parseMarkdown(lesson.body) }}></div>
       <button onClick={() => goto('quiz', { lessonId: lesson.id })}
@@ -1730,7 +1693,7 @@ function Quiz({ lessonId, user, goto, goBack }) {
       <div className="space-y-4">
         <div className={'p-6 rounded-lg text-center text-white ' + (passed ? 'bg-green-600' : 'bg-red-600')}>
           <p className="text-4xl font-bold">{score}/{questions.length}</p>
-          <p className="mt-2">{passed ? 'âœ“ Passed!' : 'âœ— Try next time'}</p>
+          <p className="mt-2">{passed ? 'Passed!' : 'Try next time'}</p>
         </div>
         {questions.map((q, i) => {
           const ua = answers[q.id]; const cor = q.correct_index;
@@ -1739,7 +1702,7 @@ function Quiz({ lessonId, user, goto, goBack }) {
               <p className="font-semibold text-sm">{i+1}. {q.question}</p>
               {q.options.map((opt, oi) => (
                 <p key={oi} className={'text-sm mt-1 ' + (oi === cor ? 'text-green-700 font-semibold' : oi === ua ? 'text-red-700' : 'text-gray-600')}>
-                  {oi === cor ? 'âœ“ ' : oi === ua ? 'âœ— ' : '  '}{opt}
+                  {oi === cor ? '+ ' : oi === ua ? '- ' : '  '}{opt}
                 </p>
               ))}
             </div>
@@ -1759,8 +1722,7 @@ function Quiz({ lessonId, user, goto, goBack }) {
           <p className="font-semibold text-sm mb-2">{i+1}. {q.question}</p>
           {q.options.map((opt, oi) => (
             <label key={oi} className="flex items-start gap-2 py-1 cursor-pointer">
-              <input type="radio" name={'q' + q.id} checked={answers[q.id] === oi}
-                onChange={() => setAnswers({...answers, [q.id]: oi})} />
+              <input type="radio" name={'q' + q.id} checked={answers[q.id] === oi} onChange={() => setAnswers({...answers, [q.id]: oi})} />
               <span className="text-sm">{opt}</span>
             </label>
           ))}
@@ -1804,9 +1766,7 @@ function Dashboard({ goto, goBack }) {
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2">Rep Performance (tap for details)</h3>
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-gray-500">
-            <th>Rep</th><th>Added</th><th>Visits</th><th>Met</th><th>Refs</th>
-          </tr></thead>
+          <thead><tr className="text-left text-gray-500"><th>Rep</th><th>Added</th><th>Visits</th><th>Met</th><th>Refs</th></tr></thead>
           <tbody>
           {Object.values(byRep).map(r => (
             <tr key={r.name} onClick={() => goto('repPerformance', { repId: r.id })} className="border-t cursor-pointer hover:bg-purple-50">
@@ -1825,8 +1785,8 @@ function Dashboard({ goto, goBack }) {
         <h3 className="font-semibold mb-2">Doctor Tiers</h3>
         <div className="flex gap-3">
           {['A','B','C'].map(t => (
-            <div key={t} className={'flex-1 p-3 rounded text-center ' + (t === 'A' ? 'bg-red-100' : t === 'B' ? 'bg-yellow-100' : 'bg-gray-100')}>
-              <p className="text-xs">{TIER_GUIDANCE[t].emoji} Tier {t}</p>
+            <div key={t} className={'flex-1 p-3 rounded text-center ' + (t === 'A' ? 'bg-rose-100' : t === 'B' ? 'bg-amber-100' : 'bg-gray-200')}>
+              <p className="text-xs">Tier {t}</p>
               <p className="text-2xl font-bold">{tierCount[t]}</p>
               <p className="text-xs">{TIER_GUIDANCE[t].advice}</p>
             </div>
@@ -1868,15 +1828,14 @@ function RepPerformance({ goto, goBack, repId }) {
   if (data.daysWorked < 4 && days === 7) flags.push('Only ' + data.daysWorked + ' working days in 7');
   if (metRate < 40 && totalVisits > 5) flags.push('Met rate < 40%');
   if (quizCount === 0) flags.push('No quiz attempts');
-  if (stumpCount > 2) flags.push(stumpCount + ' stump questions â€” may need training');
+  if (stumpCount > 2) flags.push(stumpCount + ' stump questions - may need training');
 
   return (
     <div className="space-y-4">
       <BackButton goBack={goBack} />
-      <h2 className="font-bold text-lg cion-primary-text">{repName} â€” Performance</h2>
+      <h2 className="font-bold text-lg cion-primary-text">{repName} - Performance</h2>
 
-      <ChipGroup options={[7, 14, 30]} value={days} onChange={setDays}
-        getLabel={d => d + ' days'} />
+      <ChipGroup options={[7, 14, 30]} value={days} onChange={setDays} getLabel={d => d + ' days'} />
 
       <div className="grid grid-cols-2 gap-2">
         <StatBox label="Days Worked" val={`${data.daysWorked}/${days-Math.floor(days/7)}`} />
@@ -1903,8 +1862,8 @@ function RepPerformance({ goto, goBack, repId }) {
 
       {flags.length > 0 && (
         <div className="bg-red-50 border-l-4 border-red-500 p-3 rounded">
-          <p className="text-sm font-semibold text-red-800">ðŸš© Coaching Flags</p>
-          {flags.map((f,i) => <p key={i} className="text-xs text-red-700">â€¢ {f}</p>)}
+          <p className="text-sm font-semibold text-red-800">Coaching Flags</p>
+          {flags.map((f,i) => <p key={i} className="text-xs text-red-700">- {f}</p>)}
         </div>
       )}
 
@@ -1912,13 +1871,10 @@ function RepPerformance({ goto, goBack, repId }) {
         <h3 className="font-semibold text-sm mb-2">Recent Visits</h3>
         {data.visits.slice(0, 10).map(v => (
           <div key={v.id} className="border-b py-1 last:border-0 text-xs">
-            <div className="flex justify-between">
-              <span>{v.doctors?.name}</span>
-              <span>{new Date(v.visited_at).toLocaleDateString()}</span>
-            </div>
+            <div className="flex justify-between"><span>{v.doctors?.name}</span><span>{new Date(v.visited_at).toLocaleDateString()}</span></div>
             <div className="text-gray-500">
-              {v.met_status === 'doctor' ? 'âœ“' : v.met_status === 'staff' ? 'ðŸ‘¥' : 'âœ—'} Â· I{v.interest}/5
-              {v.topics_asked?.length > 0 && ' Â· ' + v.topics_asked.length + ' topics'}
+              {v.met_status === 'doctor' ? 'Met' : v.met_status === 'staff' ? 'Staff' : 'Not met'} - I{v.interest}/5
+              {v.topics_asked?.length > 0 && ' - ' + v.topics_asked.length + ' topics'}
             </div>
           </div>
         ))}
@@ -1991,7 +1947,7 @@ function AddReferral({ goto, goBack }) {
     const { error } = await db.addReferral(payload);
     setSaving(false);
     if (error) { alert('Error: ' + error.message); return; }
-    alert('Referral logged âœ“');
+    alert('Referral logged');
     goBack();
   };
 
@@ -1999,33 +1955,27 @@ function AddReferral({ goto, goBack }) {
     <div className="space-y-3">
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Log Referral</h2>
-      <Field label="Patient Name *"><input className="input" value={form.patient_name}
-        onChange={e => setForm({...form, patient_name: e.target.value})} /></Field>
+      <Field label="Patient Name *"><input className="input" value={form.patient_name} onChange={e => setForm({...form, patient_name: e.target.value})} /></Field>
       <Field label="Referred by Doctor">
-        <select className="input" value={form.referred_by_doctor}
-          onChange={e => setForm({...form, referred_by_doctor: e.target.value})}>
+        <select className="input" value={form.referred_by_doctor} onChange={e => setForm({...form, referred_by_doctor: e.target.value})}>
           <option value="">None</option>
           {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
       </Field>
       <Field label="Influenced by Rep">
-        <select className="input" value={form.influenced_by_rep}
-          onChange={e => setForm({...form, influenced_by_rep: e.target.value})}>
+        <select className="input" value={form.influenced_by_rep} onChange={e => setForm({...form, influenced_by_rep: e.target.value})}>
           <option value="">None</option>
           {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
       </Field>
       <Field label="Zone">
-        <select className="input" value={form.zone_id}
-          onChange={e => setForm({...form, zone_id: e.target.value})}>
+        <select className="input" value={form.zone_id} onChange={e => setForm({...form, zone_id: e.target.value})}>
           <option value="">None</option>
           {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
         </select>
       </Field>
-      <Field label="Notes"><textarea className="input" rows="2" value={form.notes}
-        onChange={e => setForm({...form, notes: e.target.value})} /></Field>
-      <button onClick={submit} disabled={saving}
-        className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">
+      <Field label="Notes"><textarea className="input" rows="2" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></Field>
+      <button onClick={submit} disabled={saving} className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">
         {saving ? 'Saving...' : 'Save Referral'}
       </button>
     </div>
@@ -2052,7 +2002,7 @@ function CompetitorMap({ goto, goBack }) {
   return (
     <div className="space-y-3">
       <BackButton goBack={goBack} />
-      <h2 className="font-bold text-lg cion-primary-text">ðŸ§­ Competitor Map</h2>
+      <h2 className="font-bold text-lg cion-primary-text">Competitor Map</h2>
       <p className="text-xs text-gray-500">Where doctors currently refer cancer cases</p>
       {loading ? <p>Loading...</p> :
        sorted.length === 0 ? <p className="text-gray-500">No competitor data yet.</p> :
@@ -2062,8 +2012,8 @@ function CompetitorMap({ goto, goBack }) {
             <p className="font-semibold">{c.name}</p>
             <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">{c.count} doctor{c.count>1?'s':''}</span>
           </div>
-          <p className="text-xs text-gray-500">Specialties: {[...c.specialties].join(', ') || 'â€”'}</p>
-          <p className="text-xs text-gray-500">Zones: {[...c.zones].join(', ') || 'â€”'}</p>
+          <p className="text-xs text-gray-500">Specialties: {[...c.specialties].join(', ') || '-'}</p>
+          <p className="text-xs text-gray-500">Zones: {[...c.zones].join(', ') || '-'}</p>
         </div>
        ))
       }
@@ -2090,15 +2040,15 @@ function StatBox({ label, val }) {
 }
 
 function BottomNav({ screen, goto, isAdmin }) {
-  const items = [['home', 'ðŸ ', 'Home'], ['doctors', 'ðŸ‘¨â€âš•ï¸', 'Doctors'], ['learn', 'ðŸŽ“', 'Learn']];
-  if (isAdmin) items.push(['dashboard', 'ðŸ“Š', 'Dash']);
+  const items = [['home', 'home', 'Home'], ['doctors', 'doctor', 'Doctors'], ['learn', 'book', 'Learn']];
+  if (isAdmin) items.push(['dashboard', 'chart', 'Dash']);
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2 card-shadow">
-      {items.map(([key, icon, label]) => (
+      {items.map(([key, iconName, label]) => (
         <button key={key} onClick={() => goto(key)}
           className={'flex flex-col items-center p-1 ' + (screen === key ? 'cion-primary-text' : 'text-gray-500')}>
-          <span className="text-xl">{icon}</span>
-          <span className="text-xs">{label}</span>
+          <Icon name={iconName} size={22} />
+          <span className="text-xs mt-1">{label}</span>
         </button>
       ))}
     </nav>
