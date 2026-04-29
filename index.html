@@ -37,10 +37,14 @@
 <script type="text/babel" data-presets="react">
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.7.3';
+const APP_VERSION = 'v2.8.0';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
+const SAME_LOCATION_THRESHOLD_M = 200;
+const SAME_LOCATION_TIME_MIN = 60;
+const HIGH_POTENTIAL_DAYS = 14;
+const HIGH_POTENTIAL_MIN_SCORE = 50;
 
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -75,6 +79,12 @@ const TOPICS = [
   { key: 'referral_pct', label: 'Referral %', cat: 'cion_services' },
   { key: 'outcomes', label: 'Outcomes', cat: 'cion_services' }
 ];
+const INTEREST_OPTIONS = [
+  { value: 1, label: 'Not Interested', cls: 'bg-red-100 text-red-700 border-red-300' },
+  { value: 2, label: "Can't Say", cls: 'bg-gray-100 text-gray-700 border-gray-300' },
+  { value: 4, label: 'Interested', cls: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+  { value: 5, label: 'Highly Interested', cls: 'bg-green-100 text-green-700 border-green-300' }
+];
 
 function parseMarkdown(text) {
   if (!text) return '';
@@ -83,6 +93,26 @@ function parseMarkdown(text) {
   safe = safe.replace(/(^|[^*])\*([^*]+?)\*(?!\*)/g, '$1<em>$2</em>');
   safe = safe.replace(/\n/g, '<br/>');
   return safe;
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function isIncomplete(d) {
+  if (!d) return [];
+  const missing = [];
+  if (!d.mobile || d.mobile.length < 10) missing.push('Mobile');
+  if (!d.specialty) missing.push('Specialty');
+  if (!d.clinic_name) missing.push('Clinic name');
+  if (!d.zone_id) missing.push('Zone');
+  if (!d.visit_days || d.visit_days.length === 0) missing.push('Visit days');
+  return missing;
 }
 
 function Icon({ name, size = 16, className = '' }) {
@@ -106,17 +136,10 @@ function Icon({ name, size = 16, className = '' }) {
     case 'dna':        return <svg {...c}><path d="M4 2c8 4 8 16 16 20M20 2c-8 4-8 16-16 20M6 6h12M6 12h12M6 18h12"/></svg>;
     case 'pill':       return <svg {...c}><rect x="3" y="9" width="18" height="6" rx="3"/><path d="M12 9v6"/></svg>;
     case 'hospital':   return <svg {...c}><rect x="3" y="6" width="18" height="15"/><path d="M12 10v6M9 13h6"/><path d="M9 6V3h6v3"/></svg>;
-    case 'phone':      return <svg {...c}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13 1 .35 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12 12 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
-    case 'rupee':      return <svg {...c}><path d="M6 3h12M6 8h12M6 13l9 8M6 13c5 0 8-2 8-5"/></svg>;
-    case 'clock':      return <svg {...c}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
-    case 'arrow':      return <svg {...c}><path d="M5 12h14M13 5l7 7-7 7"/></svg>;
-    case 'check':      return <svg {...c} stroke="#16a34a"><path d="M5 12l5 5L20 7"/></svg>;
-    case 'cross':      return <svg {...c} stroke="#dc2626"><path d="M6 6l12 12M18 6L6 18"/></svg>;
-    case 'people':     return <svg {...c}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>;
-    case 'warn':       return <svg {...c} stroke="#d97706"><path d="M12 2L2 22h20L12 2z"/><path d="M12 9v5M12 18h.01"/></svg>;
-    case 'lightbulb':  return <svg {...c} stroke="#ca8a04"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c1 .9 2 1.8 2 3.3h4c0-1.5 1-2.4 2-3.3A7 7 0 0 0 12 2z"/></svg>;
+    case 'fire':       return <svg {...c} stroke="#dc2626"><path d="M12 2c2 5-2 7-2 11a4 4 0 0 0 8 0c0-2-1-3-2-5 1 4-3 5-3 2 1-3 2-5-1-8z"/></svg>;
+    case 'flame':      return <svg {...c} stroke="#f59e0b"><path d="M12 2c2 5-2 7-2 11a4 4 0 0 0 8 0c0-2-1-3-2-5 1 4-3 5-3 2 1-3 2-5-1-8z"/></svg>;
     case 'flag':       return <svg {...c} stroke="#dc2626"><path d="M4 22V4h12l-2 4 2 4H4"/></svg>;
-    case 'dot-red':    return <svg {...c} stroke="none" fill="#dc2626"><circle cx="12" cy="12" r="6"/></svg>;
+    case 'check':      return <svg {...c} stroke="#16a34a"><path d="M5 12l5 5L20 7"/></svg>;
     default:           return <svg {...c}><circle cx="12" cy="12" r="2"/></svg>;
   }
 }
@@ -180,6 +203,12 @@ const db = {
     const { data } = await q;
     return data || [];
   },
+  async getIncompleteDoctors(repId, isAdmin) {
+    let q = supa.from('doctors').select('*, zones(name), reps:created_by(name)').or('is_closed.is.null,is_closed.eq.false');
+    if (!isAdmin && repId) q = q.eq('created_by', repId);
+    const { data } = await q;
+    return (data || []).filter(d => isIncomplete(d).length > 0);
+  },
   async addPendingEdit(doctorId, repId, changes) {
     return await supa.from('pending_edits').insert([{ doctor_id: doctorId, rep_id: repId, changes }]);
   },
@@ -201,6 +230,15 @@ const db = {
   async getVisits(repId, limit = 50) {
     const { data } = await supa.from('visits').select('*, doctors(name, clinic_name)').eq('rep_id', repId)
       .order('visited_at', { ascending: false }).limit(limit);
+    return data || [];
+  },
+  async getRecentVisitsForLocationCheck(repId, minutes = 60) {
+    const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+    const { data } = await supa.from('visits')
+      .select('id, gps_lat, gps_lng, visited_at')
+      .eq('rep_id', repId)
+      .gte('visited_at', since)
+      .not('gps_lat', 'is', null);
     return data || [];
   },
   async getVisitById(id) {
@@ -233,6 +271,20 @@ const db = {
     const docs = await this.getDoctors(repId, isAdmin);
     const today = new Date().toISOString().split('T')[0];
     return docs.filter(d => d.next_followup && d.next_followup <= today && !d.is_closed);
+  },
+  async getHighPotential(repId, isAdmin) {
+    const docs = await this.getDoctors(repId, isAdmin);
+    const cutoff = new Date(Date.now() - HIGH_POTENTIAL_DAYS * 24 * 3600 * 1000);
+    const result = [];
+    for (const d of docs) {
+      if (d.score < HIGH_POTENTIAL_MIN_SCORE) continue;
+      if (d.is_closed) continue;
+      const { data: lastVisit } = await supa.from('visits').select('visited_at').eq('doctor_id', d.id).order('visited_at', { ascending: false }).limit(1).maybeSingle();
+      if (!lastVisit || new Date(lastVisit.visited_at) < cutoff) {
+        result.push({ ...d, last_visit: lastVisit?.visited_at });
+      }
+    }
+    return result.slice(0, 5);
   },
   async getAdminYesterdayReport() {
     const visits = await this.getYesterdayVisits(null, true);
@@ -268,7 +320,7 @@ const db = {
     };
   },
   async getDashboardStats() {
-    const { data: visits } = await supa.from('visits').select('rep_id, doctor_id, interest, visited_at, met_status');
+    const { data: visits } = await supa.from('visits').select('rep_id, doctor_id, interest, visited_at, met_status, gps_lat, same_location_flag');
     const { data: reps } = await supa.from('reps').select('*').eq('role', 'rep');
     const { data: doctors } = await supa.from('doctors').select('tier, zone_id, zones(name), created_by, is_closed');
     const { data: pendingCount } = await supa.from('pending_edits').select('id').eq('status','pending');
@@ -280,7 +332,7 @@ const db = {
   },
   async getRepPerformance(repId, days = 7) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
-    const { data: visits } = await supa.from('visits').select('*, doctors(name)').eq('rep_id', repId).gte('visited_at', since).order('visited_at', { ascending: false });
+    const { data: visits } = await supa.from('visits').select('*, doctors(id, name)').eq('rep_id', repId).gte('visited_at', since).order('visited_at', { ascending: false });
     const { data: addedDocs } = await supa.from('doctors').select('id, tier').eq('created_by', repId).gte('created_at', since);
     const { data: attempts } = await supa.from('quiz_attempts').select('*').eq('rep_id', repId).gte('attempted_at', since);
     const { data: referrals } = await supa.from('referrals').select('id').eq('influenced_by_rep', repId).gte('created_at', since);
@@ -290,6 +342,20 @@ const db = {
       if (d.getDay() !== 0) workedDates.add(d.toDateString());
     });
     return { visits: visits || [], addedDocs: addedDocs || [], attempts: attempts || [], referrals: referrals || [], daysWorked: workedDates.size };
+  },
+  async getRepGpsStatus(repId, days = 7) {
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+    const { data: visits } = await supa.from('visits').select('gps_lat, visited_at').eq('rep_id', repId).gte('visited_at', since);
+    const totalDays = days;
+    const daysByGps = {};
+    (visits || []).forEach(v => {
+      const d = new Date(v.visited_at).toDateString();
+      if (!daysByGps[d]) daysByGps[d] = { total: 0, withGps: 0 };
+      daysByGps[d].total++;
+      if (v.gps_lat) daysByGps[d].withGps++;
+    });
+    const noGpsDays = Object.values(daysByGps).filter(d => d.total > 0 && d.withGps === 0).length;
+    return { totalActiveDays: Object.keys(daysByGps).length, noGpsDays };
   },
   async addReferral(ref) { return await supa.from('referrals').insert([ref]).select().single(); },
   async getLessons() {
@@ -313,27 +379,107 @@ const db = {
     if (all && all.length) return all[Math.floor(Math.random() * all.length)];
     return null;
   },
+  async getTodayLearningCompletion(repId) {
+    const today = new Date().toISOString().split('T')[0];
+    const { data } = await supa.from('daily_learning_completion').select('*').eq('rep_id', repId).eq('completion_date', today).maybeSingle();
+    return data;
+  },
+  async logDailyLearning(repId, lessonId, score, total) {
+    const today = new Date().toISOString().split('T')[0];
+    return await supa.from('daily_learning_completion').upsert([{
+      rep_id: repId, completion_date: today, lesson_id: lessonId, score, total
+    }], { onConflict: 'rep_id,completion_date' });
+  },
+  async getLearningStreak(repId) {
+    const { data } = await supa.from('daily_learning_completion').select('completion_date').eq('rep_id', repId).order('completion_date', { ascending: false }).limit(60);
+    if (!data || data.length === 0) return 0;
+    let streak = 0;
+    let cursor = new Date();
+    cursor.setHours(0,0,0,0);
+    const dates = new Set(data.map(r => r.completion_date));
+    while (true) {
+      if (cursor.getDay() === 0) { cursor.setDate(cursor.getDate() - 1); continue; }
+      const ds = cursor.toISOString().split('T')[0];
+      if (dates.has(ds)) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+      } else break;
+    }
+    return streak;
+  },
+  async getLearningSummary(repId) {
+    const { data } = await supa.from('daily_learning_completion').select('completion_date').eq('rep_id', repId).order('completion_date', { ascending: false });
+    const lastDate = data && data.length ? data[0].completion_date : null;
+    const streak = await this.getLearningStreak(repId);
+    let missedDays = 0;
+    const dateSet = new Set((data || []).map(r => r.completion_date));
+    const cursor = new Date();
+    cursor.setHours(0,0,0,0);
+    cursor.setDate(cursor.getDate() - 1);
+    for (let i = 0; i < 7; i++) {
+      if (cursor.getDay() !== 0) {
+        const ds = cursor.toISOString().split('T')[0];
+        if (!dateSet.has(ds)) missedDays++;
+      }
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return { lastDate, streak, missedDays };
+  },
   async getCompetitorMap() {
     const { data: docs } = await supa.from('doctors').select('refers_to, specialty, zones(name)').not('refers_to','is',null).neq('refers_to','');
     return docs || [];
+  },
+  async getStumpsAdmin() {
+    const { data } = await supa.from('visits')
+      .select('id, stump_question, stump_answer, stump_answered_at, visited_at, doctor_id, rep_id, doctors(name), reps(name)')
+      .not('stump_question','is',null).neq('stump_question','')
+      .order('visited_at', { ascending: false });
+    return data || [];
+  },
+  async answerStump(visitId, answer, answeredBy) {
+    return await supa.from('visits').update({
+      stump_answer: answer,
+      stump_answered_at: new Date().toISOString()
+    }).eq('id', visitId);
+  },
+  async getStumpsForRep(repId) {
+    const { data } = await supa.from('visits')
+      .select('id, stump_question, stump_answer, stump_answered_at, visited_at, doctors(name)')
+      .eq('rep_id', repId)
+      .not('stump_question','is',null).neq('stump_question','')
+      .order('visited_at', { ascending: false }).limit(20);
+    return data || [];
+  },
+  async getAllAnsweredStumps() {
+    const { data } = await supa.from('visits')
+      .select('id, stump_question, stump_answer, stump_answered_at, doctors(name), reps(name)')
+      .not('stump_answer','is',null).neq('stump_answer','')
+      .order('stump_answered_at', { ascending: false }).limit(50);
+    return data || [];
   }
 };
 
 const scoring = {
+  suspiciousPoints(suspicious_cases) {
+    const map = { '1-2': 5, '3-5': 12, 'more': 18, 'quarterly': 3, 'rarely': 0 };
+    return map[suspicious_cases] || 0;
+  },
   calculate(doc, lastVisit = null) {
-    let interest = 0, load = 0, fit = 0, warmth = 0, topics = 0;
-    if (lastVisit && lastVisit.interest) interest = (lastVisit.interest / 5) * 35;
-    const loadMap = { 'Empty': 5, 'Few': 12, 'Steady': 20, 'Packed': 25 };
+    let interest = 0, load = 0, fit = 0, warmth = 0, topics = 0, suspicious = 0, activeRefer = 0;
+    if (lastVisit && lastVisit.interest) interest = (lastVisit.interest / 5) * 30;
+    const loadMap = { 'Empty': 4, 'Few': 10, 'Steady': 16, 'Packed': 20 };
     load = loadMap[doc.waiting_room] || 0;
     const highFit = ['GP','Physician','ENT','Gynae','General Surgeon','Dentist','Maxillofacial','Small Hospital'];
-    if (highFit.includes(doc.specialty)) fit = 15;
-    else if (doc.specialty) fit = 8;
+    if (highFit.includes(doc.specialty)) fit = 12;
+    else if (doc.specialty) fit = 6;
     if (lastVisit) {
       if (lastVisit.met_status === 'doctor') warmth += 5;
-      if (lastVisit.referral_likely === 'yes') warmth += 4;
-      if (Array.isArray(lastVisit.topics_asked)) topics = Math.min(16, lastVisit.topics_asked.length * 2);
+      if (lastVisit.referral_likely === 'yes') warmth += 3;
+      if (Array.isArray(lastVisit.topics_asked)) topics = Math.min(12, lastVisit.topics_asked.length * 1.5);
+      if (lastVisit.suspicious_cases) suspicious = scoring.suspiciousPoints(lastVisit.suspicious_cases);
     }
-    return Math.round(interest + load + fit + warmth + topics);
+    if (doc.refers_to && doc.refers_to.trim().length > 0) activeRefer = 10;
+    return Math.min(100, Math.round(interest + load + fit + warmth + topics + suspicious + activeRefer));
   },
   tier(score) {
     if (score >= 70) return 'A';
@@ -507,13 +653,16 @@ function App() {
         {screen === 'logVisit' && <LogVisit user={currentUser} goto={goto} goBack={goBack} preDoctorId={screenParams.doctorId} />}
         {screen === 'editVisit' && <EditVisit user={currentUser} goto={goto} goBack={goBack} visitId={screenParams.visitId} />}
         {screen === 'learn' && <Learn user={currentUser} goto={goto} />}
-        {screen === 'lessonView' && <LessonView lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} />}
-        {screen === 'quiz' && <Quiz lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} />}
+        {screen === 'lessonView' && <LessonView lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} mini={screenParams.mini} />}
+        {screen === 'quiz' && <Quiz lessonId={screenParams.lessonId} user={currentUser} goto={goto} goBack={goBack} mini={screenParams.mini} />}
+        {screen === 'myStumps' && <MyStumps user={currentUser} goto={goto} goBack={goBack} />}
         {screen === 'dashboard' && isAdmin && <Dashboard goto={goto} goBack={goBack} />}
         {screen === 'repPerformance' && isAdmin && <RepPerformance goto={goto} goBack={goBack} repId={screenParams.repId} />}
         {screen === 'pendingEdits' && isAdmin && <PendingEditsQueue user={currentUser} goto={goto} goBack={goBack} />}
         {screen === 'addReferral' && isAdmin && <AddReferral goto={goto} goBack={goBack} />}
         {screen === 'competitors' && isAdmin && <CompetitorMap goto={goto} goBack={goBack} />}
+        {screen === 'incompleteAdmin' && isAdmin && <IncompleteAdmin goto={goto} goBack={goBack} />}
+        {screen === 'stumpsAdmin' && isAdmin && <StumpsAdmin user={currentUser} goto={goto} goBack={goBack} />}
       </main>
       <BottomNav screen={screen} goto={goto} isAdmin={isAdmin} />
     </div>
@@ -631,26 +780,36 @@ function ProgressRing({ value, max, size = 80, stroke = 8 }) {
   );
 }
 
+function DoctorLink({ doctor, goto, children }) {
+  return <span onClick={(e) => { e.stopPropagation(); goto('doctorDetail', { doctorId: doctor.id || doctor.doctor_id }); }}
+    className="text-purple-700 underline cursor-pointer">{children || doctor.name}</span>;
+}
+
 function RepHome({ user, goto }) {
   const [actions, setActions] = useState([]);
   const [stats, setStats] = useState({ visits: 0, doctors: 0 });
   const [dailyLesson, setDailyLesson] = useState(null);
   const [target, setTarget] = useState({ metCount: 0, total: 0 });
   const [yesterday, setYesterday] = useState([]);
-  const [stubs, setStubs] = useState([]);
+  const [highPotential, setHighPotential] = useState([]);
+  const [incomplete, setIncomplete] = useState([]);
+  const [learning, setLearning] = useState({ done: false, streak: 0 });
   const [loading, setLoading] = useState(true);
   const isSunday = new Date().getDay() === 0;
 
   useEffect(() => {
     (async () => {
-      const [acts, docs, vis, lesson, tgt, yRec, stubList] = await Promise.all([
+      const [acts, docs, vis, lesson, tgt, yRec, hp, inc, todayLearn, streak] = await Promise.all([
         db.getTodayActions(user.id, false),
         db.getDoctors(user.id, false),
         db.getVisits(user.id, 100),
         db.getDailyLesson(),
         db.getTodayTarget(user.id),
         db.getYesterdayVisits(user.id, false),
-        db.getStubDoctors(user.id, false)
+        db.getHighPotential(user.id, false),
+        db.getIncompleteDoctors(user.id, false),
+        db.getTodayLearningCompletion(user.id),
+        db.getLearningStreak(user.id)
       ]);
       setActions(acts);
       const thisWeek = vis.filter(v => (Date.now() - new Date(v.visited_at)) < 7 * 24 * 3600 * 1000);
@@ -658,7 +817,9 @@ function RepHome({ user, goto }) {
       setDailyLesson(lesson);
       setTarget(tgt);
       setYesterday(yRec);
-      setStubs(stubList);
+      setHighPotential(hp);
+      setIncomplete(inc);
+      setLearning({ done: !!todayLearn, streak });
       setLoading(false);
     })();
   }, [user.id]);
@@ -672,11 +833,28 @@ function RepHome({ user, goto }) {
           <p className="text-xs text-gray-600">
             {isSunday ? "It's Sunday, rest day" :
              target.metCount >= DAILY_TARGET ? "Target crushed!" :
-             (DAILY_TARGET - target.metCount) + " more doctor-met visits to hit 10"}
+             (DAILY_TARGET - target.metCount) + " more doctor-met visits"}
           </p>
           <p className="text-xs text-gray-500 mt-1">Total visits today: {target.total}</p>
         </div>
       </div>
+
+      {dailyLesson && !isSunday && (
+        <div onClick={() => goto('lessonView', { lessonId: dailyLesson.id, mini: true })}
+          className={'border-l-4 p-3 rounded cursor-pointer ' + (learning.done ? 'bg-green-50 border-green-600' : 'bg-purple-50 border-purple-700')}>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-semibold text-purple-700">DAILY LEARNING (~90 sec)</p>
+              <p className="font-bold mt-1">{dailyLesson.title}</p>
+              <p className="text-xs text-gray-600 mt-1">{dailyLesson.category}</p>
+            </div>
+            <div className="text-right">
+              {learning.done && <span className="text-green-700 text-sm font-bold">Done</span>}
+              <p className="text-xs text-gray-500 mt-1">Streak: {learning.streak}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white p-3 rounded-lg card-shadow">
@@ -696,24 +874,34 @@ function RepHome({ user, goto }) {
         + Log New Visit
       </button>
 
-      {stubs.length > 0 && (
-        <div className="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
-          <p className="text-sm font-semibold text-orange-800">{stubs.length} doctor{stubs.length>1?'s':''} need full details</p>
-          {stubs.slice(0,3).map(s => (
-            <div key={s.id} onClick={() => goto('editDoctor', { doctorId: s.id })}
-              className="text-xs underline text-orange-700 cursor-pointer mt-1">
-              {s.name} - {s.zones?.name} - tap to complete
+      {highPotential.length > 0 && (
+        <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
+          <p className="text-sm font-semibold text-amber-800">High Potential - Not Visited 14+ Days</p>
+          {highPotential.map(d => (
+            <div key={d.id} onClick={() => goto('doctorDetail', { doctorId: d.id })}
+              className="border-b py-2 last:border-0 cursor-pointer">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="font-semibold text-sm">{d.name}</p>
+                  <p className="text-xs text-gray-600">{d.specialty} - {d.zones?.name} - Score {d.score}</p>
+                </div>
+                <TierBadge tier={d.tier} />
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {dailyLesson && (
-        <div onClick={() => goto('lessonView', { lessonId: dailyLesson.id })}
-          className="bg-purple-50 border-l-4 border-purple-700 p-3 rounded cursor-pointer">
-          <p className="text-xs font-semibold text-purple-700">TODAY'S LESSON</p>
-          <p className="font-bold mt-1">{dailyLesson.title}</p>
-          <p className="text-xs text-gray-600 mt-1">{dailyLesson.category} - tap to read + take quiz</p>
+      {incomplete.length > 0 && (
+        <div className="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
+          <p className="text-sm font-semibold text-orange-800">{incomplete.length} doctor{incomplete.length>1?'s':''} need details</p>
+          {incomplete.slice(0,5).map(d => (
+            <div key={d.id} onClick={() => goto('editDoctor', { doctorId: d.id })}
+              className="text-xs cursor-pointer mt-1 py-1 border-b last:border-0">
+              <span className="text-orange-700 underline font-semibold">{d.name}</span>
+              <span className="text-gray-600"> - missing: {isIncomplete(d).join(', ')}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -723,10 +911,13 @@ function RepHome({ user, goto }) {
           <p className="text-xs text-gray-500 mb-2">{yesterday.length} visit{yesterday.length>1?'s':''}</p>
           {yesterday.slice(0, 8).map(v => (
             <div key={v.id} className="flex justify-between items-center border-b py-1 last:border-0">
-              <div>
-                <p className="text-sm font-semibold">{v.doctors?.name}</p>
+              <div className="flex-1">
+                <DoctorLink doctor={{ id: v.doctor_id, name: v.doctors?.name }} goto={() => goto('doctorDetail', { doctorId: v.doctor_id })}>
+                  <p className="text-sm font-semibold text-purple-700 underline">{v.doctors?.name}</p>
+                </DoctorLink>
                 <p className="text-xs text-gray-500">
                   {v.gps_lat ? `Lat ${v.gps_lat.toFixed(3)}, Lng ${v.gps_lng.toFixed(3)}` : 'No GPS'}
+                  {v.same_location_flag && <span className="text-orange-600 ml-2">(same-loc flag)</span>}
                 </p>
               </div>
               <span className="text-xs">
@@ -754,7 +945,7 @@ function RepHome({ user, goto }) {
             className="border-b py-2 last:border-0 cursor-pointer">
             <div className="flex justify-between items-start">
               <div className="flex-1">
-                <p className="font-semibold">{a.name}</p>
+                <p className="font-semibold text-purple-700 underline">{a.name}</p>
                 <p className="text-xs text-gray-500">{a.clinic_name} - {a.zones?.name}</p>
                 <p className="text-xs mt-1 text-gray-600">{TIER_GUIDANCE[a.tier || 'C'].advice}</p>
               </div>
@@ -764,6 +955,10 @@ function RepHome({ user, goto }) {
          ))
         }
       </div>
+
+      <button onClick={() => goto('myStumps')} className="w-full bg-white border border-purple-300 text-purple-700 py-2 rounded text-sm">
+        My Doctor's Questions (stumps)
+      </button>
     </div>
   );
 }
@@ -771,12 +966,34 @@ function RepHome({ user, goto }) {
 function AdminHome({ user, goto }) {
   const [report, setReport] = useState(null);
   const [overview, setOverview] = useState(null);
+  const [reps, setReps] = useState([]);
+  const [gpsAlerts, setGpsAlerts] = useState({});
+  const [learningSummary, setLearningSummary] = useState({});
+  const [incompleteCount, setIncompleteCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [r, o] = await Promise.all([db.getAdminYesterdayReport(), db.getAdminTodayOverview()]);
-      setReport(r); setOverview(o); setLoading(false);
+      const [r, o, allReps, allInc] = await Promise.all([
+        db.getAdminYesterdayReport(),
+        db.getAdminTodayOverview(),
+        db.getReps(),
+        db.getIncompleteDoctors(null, true)
+      ]);
+      setReport(r); setOverview(o);
+      const repList = allReps.filter(x => x.role === 'rep');
+      setReps(repList);
+      setIncompleteCount(allInc.length);
+
+      const gpsData = {};
+      const learnData = {};
+      for (const rep of repList) {
+        gpsData[rep.id] = await db.getRepGpsStatus(rep.id, 7);
+        learnData[rep.id] = await db.getLearningSummary(rep.id);
+      }
+      setGpsAlerts(gpsData);
+      setLearningSummary(learnData);
+      setLoading(false);
     })();
   }, []);
 
@@ -792,18 +1009,27 @@ function AdminHome({ user, goto }) {
       </div>
 
       <div className="bg-white p-4 rounded-lg card-shadow">
-        <h3 className="font-semibold mb-2 text-sm">Rep Activity Yesterday</h3>
-        {report.repActivity.length === 0 ? <p className="text-xs text-gray-500">No reps</p> :
-         report.repActivity.map(r => (
-          <div key={r.name} className="flex justify-between items-center border-b py-2 last:border-0">
-            <p className="text-sm">{r.name}</p>
-            <div className="text-xs text-gray-600">
-              {r.visits} visits - {r.met} met
-              {r.visits === 0 && <span className="ml-2 text-red-600">inactive</span>}
+        <h3 className="font-semibold mb-2 text-sm">Rep Status</h3>
+        {reps.map(r => {
+          const yest = report.repActivity.find(a => a.name === r.name) || { visits: 0, met: 0 };
+          const gps = gpsAlerts[r.id] || { totalActiveDays: 0, noGpsDays: 0 };
+          const learn = learningSummary[r.id] || { lastDate: null, streak: 0, missedDays: 0 };
+          return (
+            <div key={r.id} onClick={() => goto('repPerformance', { repId: r.id })}
+              className="border-b py-2 last:border-0 cursor-pointer">
+              <div className="flex justify-between items-start">
+                <p className="text-sm font-semibold text-purple-700 underline">{r.name}</p>
+                <p className="text-xs text-gray-600">{yest.visits} visits | {yest.met} met</p>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {yest.visits === 0 && <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">inactive yesterday</span>}
+                {gps.noGpsDays > 0 && <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">No GPS {gps.noGpsDays}d</span>}
+                {learn.streak > 0 && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Learn streak {learn.streak}</span>}
+                {learn.missedDays >= 3 && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Missed learning {learn.missedDays}d</span>}
+              </div>
             </div>
-          </div>
-         ))
-        }
+          );
+        })}
       </div>
 
       <h2 className="font-bold text-lg cion-primary-text mt-4">Today's Overview</h2>
@@ -821,6 +1047,12 @@ function AdminHome({ user, goto }) {
           className="cion-primary text-white py-3 rounded font-bold text-sm">
           Pending Edits {overview.pendingEdits > 0 && '(' + overview.pendingEdits + ')'}
         </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => goto('stumpsAdmin')}
+          className="bg-amber-600 text-white py-3 rounded font-bold text-sm">Answer Stumps {overview.openStumps > 0 && '(' + overview.openStumps + ')'}</button>
+        <button onClick={() => goto('incompleteAdmin')}
+          className="bg-orange-600 text-white py-3 rounded font-bold text-sm">Incomplete Doctors ({incompleteCount})</button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => goto('dashboard')}
@@ -912,27 +1144,31 @@ function DoctorList({ user, goto, goBack }) {
 
       {loading ? <p>Loading...</p> :
        filtered.length === 0 ? <p className="text-gray-500 text-center py-8">No doctors. Tap "+ Add"</p> :
-       filtered.map(d => (
-        <div key={d.id} onClick={() => goto('doctorDetail', { doctorId: d.id })}
-          className="bg-white p-3 rounded-lg card-shadow cursor-pointer">
-          <div className="flex justify-between">
-            <div className="flex-1">
-              <p className="font-semibold">
-                {d.name}
-                {d.is_stub && <span className="ml-1 text-xs bg-orange-100 text-orange-700 px-1 rounded">stub</span>}
-                {d.is_closed && <span className="ml-1 text-xs bg-red-100 text-red-700 px-1 rounded">closed</span>}
-              </p>
-              <p className="text-xs text-gray-500">{d.specialty} - {d.clinic_name}</p>
-              <p className="text-xs">{d.zones?.name} - Rs.{d.op_fee || '-'}</p>
-              {isAdmin && <p className="text-xs text-gray-400">by {d.reps?.name}</p>}
-            </div>
-            <div className="text-right space-y-1">
-              <TierBadge tier={d.tier} />
-              <p className="text-xs">Score: {d.score}</p>
+       filtered.map(d => {
+        const missing = isIncomplete(d);
+        return (
+          <div key={d.id} onClick={() => goto('doctorDetail', { doctorId: d.id })}
+            className="bg-white p-3 rounded-lg card-shadow cursor-pointer">
+            <div className="flex justify-between">
+              <div className="flex-1">
+                <p className="font-semibold">
+                  <span className="text-purple-700 underline">{d.name}</span>
+                  {missing.length > 0 && <span className="ml-1 text-xs bg-orange-100 text-orange-700 px-1 rounded">incomplete</span>}
+                  {d.is_closed && <span className="ml-1 text-xs bg-red-100 text-red-700 px-1 rounded">closed</span>}
+                </p>
+                <p className="text-xs text-gray-500">{d.specialty} - {d.clinic_name}</p>
+                <p className="text-xs">{d.zones?.name} - Rs.{d.op_fee || '-'}</p>
+                {isAdmin && <p className="text-xs text-gray-400">by {d.reps?.name}</p>}
+                {missing.length > 0 && <p className="text-xs text-orange-600">Missing: {missing.join(', ')}</p>}
+              </div>
+              <div className="text-right space-y-1">
+                <TierBadge tier={d.tier} />
+                <p className="text-xs">Score: {d.score}</p>
+              </div>
             </div>
           </div>
-        </div>
-       ))
+        );
+       })
       }
     </div>
   );
@@ -970,6 +1206,8 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
   if (loading) return <p>Loading...</p>;
   if (!doc) return <p>Doctor not found.</p>;
 
+  const missing = isIncomplete(doc);
+
   return (
     <div className="space-y-3">
       <BackButton goBack={goBack} />
@@ -987,7 +1225,7 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
           </div>
         </div>
 
-        {doc.is_stub && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">Incomplete profile - tap Edit</p>}
+        {missing.length > 0 && <p className="text-xs bg-orange-100 text-orange-700 p-2 rounded">Missing: {missing.join(', ')} - tap Edit</p>}
         {doc.is_closed && <p className="text-xs bg-red-100 text-red-700 p-2 rounded">CLOSED: {doc.closed_reason}</p>}
 
         <div className="grid grid-cols-2 gap-2 text-xs text-gray-700 mt-2">
@@ -995,6 +1233,7 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
           {doc.op_fee && <div>Fee: Rs.{doc.op_fee}</div>}
           {doc.waiting_room && <div>Wait: {doc.waiting_room}</div>}
           {doc.area_class && <div>Area: {doc.area_class}</div>}
+          {doc.does_biopsy_inhouse && <div>Biopsy in-house: {doc.does_biopsy_inhouse}</div>}
           {doc.next_followup && <div className="col-span-2">Next: {doc.next_followup}</div>}
           {doc.visit_days?.length > 0 && <div className="col-span-2">Best days: {doc.visit_days.join(', ')}</div>}
           {doc.visit_hours?.length > 0 && <div className="col-span-2">Times: {doc.visit_hours.join(', ')}</div>}
@@ -1017,19 +1256,30 @@ function DoctorDetail({ user, goto, goBack, doctorId }) {
         {visits.length === 0 ? <p className="text-xs text-gray-500">No visits yet.</p> :
          visits.map(v => {
           const canEdit = (v.rep_id === user.id) && ((Date.now() - new Date(v.visited_at)) < 24 * 3600 * 1000);
+          const interestLabel = INTEREST_OPTIONS.find(o => o.value === v.interest)?.label || `${v.interest}/5`;
           return (
             <div key={v.id} className="border-b py-2 last:border-0">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-xs text-gray-500">
                     {new Date(v.visited_at).toLocaleDateString()} {isAdmin && `- ${v.reps?.name}`}
+                    {v.same_location_flag && <span className="text-orange-600 ml-2">(same-loc flag)</span>}
                   </p>
                   <p className="text-sm">
                     {v.met_status === 'doctor' ? 'Met doctor' : v.met_status === 'staff' ? 'Staff only' : 'Not met'}
-                    {' - '}Interest {v.interest}/5
+                    {' - '}{interestLabel}
                   </p>
-                  {v.topics_asked?.length > 0 && <p className="text-xs text-purple-700">Asked: {v.topics_asked.length} topic(s)</p>}
-                  {v.stump_question && <p className="text-xs text-orange-700 italic">"{v.stump_question}"</p>}
+                  {v.topics_asked?.length > 0 && (
+                    <p className="text-xs text-purple-700">Asked: {v.topics_asked.map(tk => TOPICS.find(t => t.key === tk)?.label || tk).join(', ')}</p>
+                  )}
+                  {v.suspicious_cases && <p className="text-xs text-gray-600">Suspicious cases: {v.suspicious_cases}/month</p>}
+                  {v.stump_question && (
+                    <div className="bg-yellow-50 p-2 mt-1 rounded">
+                      <p className="text-xs italic text-orange-800">Q: "{v.stump_question}"</p>
+                      {v.stump_answer && <p className="text-xs mt-1 text-green-800">A: {v.stump_answer}</p>}
+                      {!v.stump_answer && <p className="text-xs mt-1 text-gray-500">(awaiting admin answer)</p>}
+                    </div>
+                  )}
                   {v.next_followup && <p className="text-xs text-gray-500">Next: {v.next_followup}</p>}
                 </div>
                 {canEdit && (
@@ -1066,6 +1316,19 @@ function ChipGroup({ options, value, onChange, multi = false, getLabel = null })
   );
 }
 
+function InterestPicker({ value, onChange }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {INTEREST_OPTIONS.map(opt => (
+        <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
+          className={'p-2 rounded border-2 text-sm font-semibold ' + (value === opt.value ? opt.cls : 'bg-white border-gray-200 text-gray-500')}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function DoctorForm({ user, goto, goBack, doctorId = null }) {
   const isEdit = !!doctorId;
   const isAdmin = user.role === 'admin';
@@ -1075,7 +1338,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
   const [form, setForm] = useState({
     name: '', mobile: '', specialty: '', clinic_name: '', zone_id: '',
     op_fee: '', waiting_room: '', area_class: '',
-    cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
+    does_biopsy_inhouse: '',
     refers_to: '', visit_days: [], visit_hours: []
   });
   const [saving, setSaving] = useState(false);
@@ -1090,7 +1353,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
             name: d.name || '', mobile: d.mobile || '', specialty: d.specialty || '',
             clinic_name: d.clinic_name || '', zone_id: d.zone_id || '',
             op_fee: d.op_fee || '', waiting_room: d.waiting_room || '', area_class: d.area_class || '',
-            cancer_services: d.cancer_services || { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' },
+            does_biopsy_inhouse: d.does_biopsy_inhouse || '',
             refers_to: d.refers_to || '',
             visit_days: d.visit_days || [], visit_hours: d.visit_hours || []
           });
@@ -1111,7 +1374,8 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     const payload = {
       ...form,
       op_fee: form.op_fee ? parseInt(form.op_fee) : null,
-      zone_id: form.zone_id ? parseInt(form.zone_id) : null
+      zone_id: form.zone_id ? parseInt(form.zone_id) : null,
+      does_biopsy_inhouse: form.does_biopsy_inhouse || null
     };
 
     if (isEdit) {
@@ -1162,8 +1426,6 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     goBack();
   };
 
-  const setSvc = (k, v) => setForm({ ...form, cancer_services: { ...form.cancer_services, [k]: v }});
-
   return (
     <div className="space-y-3">
       <BackButton goBack={goBack} />
@@ -1190,8 +1452,10 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
       </select></Field>
 
-      <Field label="Mobile (10-digit)"><input className="input" type="tel" maxLength="10" value={form.mobile} onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
-      <Field label="Clinic Name"><input className="input" value={form.clinic_name} onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
+      <Field label="Mobile (10-digit) *"><input className="input" type="tel" maxLength="10" value={form.mobile} onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
+      <Field label="Clinic Name *"><input className="input" value={form.clinic_name} onChange={e => setForm({...form, clinic_name: e.target.value})} /></Field>
+      <Field label="Best Days *"><ChipGroup options={DAYS} value={form.visit_days} multi onChange={v => setForm({...form, visit_days: v})} /></Field>
+      <Field label="Best Time Slots"><ChipGroup options={HOURS} value={form.visit_hours} multi onChange={v => setForm({...form, visit_hours: v})} /></Field>
       <Field label="OP Fee (Rs.)"><input className="input" type="number" value={form.op_fee} onChange={e => setForm({...form, op_fee: e.target.value})} /></Field>
       <Field label="Waiting Room">
         <ChipGroup options={['Empty','Few','Steady','Packed']} value={form.waiting_room} onChange={v => setForm({...form, waiting_room: v})} />
@@ -1199,25 +1463,12 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
       <Field label="Area Class">
         <ChipGroup options={['Posh','Mixed','Lower']} value={form.area_class} onChange={v => setForm({...form, area_class: v})} />
       </Field>
-      <Field label="Best Days"><ChipGroup options={DAYS} value={form.visit_days} multi onChange={v => setForm({...form, visit_days: v})} /></Field>
-      <Field label="Best Time Slots"><ChipGroup options={HOURS} value={form.visit_hours} multi onChange={v => setForm({...form, visit_hours: v})} /></Field>
-
-      <div className="bg-white p-3 rounded card-shadow">
-        <p className="font-semibold mb-2 text-sm">Cancer Service Map</p>
-        {[['biopsy','Biopsy'],['screening','Screening'],['surgery','Complex Surgery'],
-          ['chemo','Chemotherapy'],['radiation','Radiation'],['supportive','Supportive Care']].map(([k, label]) => (
-          <div key={k} className="flex items-center justify-between py-1">
-            <span className="text-sm">{label}</span>
-            <div className="flex gap-1">
-              {[['in','In'],['out','Out'],['na','N/A']].map(([v,lbl]) => (
-                <span key={v} className={'chip ' + (form.cancer_services[k] === v ? 'chip-on' : 'chip-off')} onClick={() => setSvc(k, v)}>{lbl}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <Field label="Refers To"><input className="input" value={form.refers_to} onChange={e => setForm({...form, refers_to: e.target.value})} /></Field>
+      <Field label="Does biopsies in-house?">
+        <ChipGroup options={['yes','no','dont_know']}
+          getLabel={k => k === 'yes' ? 'Yes' : k === 'no' ? 'No' : "Don't know"}
+          value={form.does_biopsy_inhouse} onChange={v => setForm({...form, does_biopsy_inhouse: v})} />
+      </Field>
+      <Field label="Currently refers cancer cases to (if any)"><input className="input" value={form.refers_to} onChange={e => setForm({...form, refers_to: e.target.value})} placeholder="Hospital / doctor name" /></Field>
 
       <button onClick={submit} disabled={saving} className="w-full cion-primary text-white py-3 rounded-lg font-bold disabled:opacity-50">
         {saving ? 'Saving...' : (isEdit ? (isAdmin || original?.is_stub ? 'Save' : 'Submit for Approval') : 'Save Doctor')}
@@ -1235,14 +1486,14 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickForm, setQuickForm] = useState({ name: '', specialty: '' });
   const [form, setForm] = useState({
-    met_status: '', time_spent: '', interest: 3, referral_likely: '',
+    met_status: '', time_spent: '', interest: null, referral_likely: '',
     phone_status: '', phone_captured: '', suspicious_cases: '',
-    topics_asked: [], stump_question: '', next_followup: '',
-    update_visit_time: false, visit_days: [], visit_hours: []
+    topics_asked: [], stump_question: '', next_followup: ''
   });
   const [gps, setGps] = useState(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [locationWarning, setLocationWarning] = useState(null);
   const isAdmin = user.role === 'admin';
 
   const loadDocs = async () => {
@@ -1276,8 +1527,7 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     if (!quickForm.name || !quickForm.specialty || !zoneId) { alert('Name, specialty, zone required'); return; }
     const payload = {
       name: quickForm.name, specialty: quickForm.specialty, zone_id: parseInt(zoneId),
-      created_by: user.id, score: 0, tier: 'C', is_stub: true,
-      cancer_services: { biopsy:'na', screening:'na', surgery:'na', chemo:'na', radiation:'na', supportive:'na' }
+      created_by: user.id, score: 0, tier: 'C', is_stub: true
     };
     const { data, error } = await db.addDoctor(payload);
     if (error) { alert('Error: ' + error.message); return; }
@@ -1287,10 +1537,30 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     setQuickForm({ name: '', specialty: '' });
   };
 
+  const checkSameLocation = async () => {
+    if (!gps) return false;
+    const recent = await db.getRecentVisitsForLocationCheck(user.id, SAME_LOCATION_TIME_MIN);
+    let nearbyCount = 0;
+    for (const r of recent) {
+      const d = distanceMeters(gps.lat, gps.lng, r.gps_lat, r.gps_lng);
+      if (d <= SAME_LOCATION_THRESHOLD_M) nearbyCount++;
+    }
+    return nearbyCount >= 2;
+  };
+
   const submit = async () => {
     if (!doctorId) { alert('Select a doctor'); return; }
     if (!form.met_status) { alert('Mark met status'); return; }
+    if (!form.interest) { alert('Pick interest level'); return; }
+
     setSaving(true);
+
+    const sameLoc = await checkSameLocation();
+    if (sameLoc && !locationWarning) {
+      setLocationWarning(true);
+      setSaving(false);
+      return;
+    }
 
     const visit = {
       doctor_id: doctorId, rep_id: user.id, visit_type: 'followup',
@@ -1302,7 +1572,8 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       topics_asked: form.topics_asked,
       stump_question: form.stump_question,
       next_followup: form.next_followup || null,
-      gps_lat: gps?.lat, gps_lng: gps?.lng
+      gps_lat: gps?.lat, gps_lng: gps?.lng,
+      same_location_flag: sameLoc
     };
 
     if (!navigator.onLine) {
@@ -1322,10 +1593,6 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       newTier = scoring.tier(newScore);
       const updates = { score: newScore, tier: newTier, next_followup: visit.next_followup };
       if (form.phone_status === 'got_today' && form.phone_captured) updates.mobile = form.phone_captured;
-      if (form.update_visit_time) {
-        updates.visit_days = form.visit_days;
-        updates.visit_hours = form.visit_hours;
-      }
       await db.updateDoctor(doctorId, updates);
     }
 
@@ -1336,6 +1603,24 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       nextFollowup: form.next_followup, stumpQ: form.stump_question
     });
   };
+
+  if (locationWarning && !feedback) {
+    return (
+      <div className="space-y-3">
+        <div className="bg-orange-100 border-l-4 border-orange-500 p-4 rounded">
+          <p className="font-bold text-orange-800">Same Location Warning</p>
+          <p className="text-sm text-orange-700 mt-2">
+            You've logged 2+ other visits within {SAME_LOCATION_THRESHOLD_M}m of this location in the last hour.
+            Confirm you're physically at the doctor's clinic.
+          </p>
+        </div>
+        <button onClick={async () => { setLocationWarning('confirmed'); await submit(); }}
+          className="w-full cion-primary text-white py-3 rounded font-bold">Yes, I'm at the clinic - submit</button>
+        <button onClick={() => { setLocationWarning(null); }}
+          className="w-full bg-gray-300 py-2 rounded">Cancel - log later</button>
+      </div>
+    );
+  }
 
   if (feedback) {
     const tierUp = ['C','B','A'].indexOf(feedback.newTier) > ['C','B','A'].indexOf(feedback.oldTier);
@@ -1363,36 +1648,16 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
               {tierDown && <span className="text-red-700"> (down)</span>}
             </span>
           </div>
-          {feedback.topicsAsked.length > 0 && (
-            <p className="text-xs text-gray-600">Doctor asked {feedback.topicsAsked.length} topic(s) - +{feedback.topicsAsked.length * 2} boost</p>
-          )}
           {feedback.nextFollowup && <p className="text-sm">Next: {feedback.nextFollowup}</p>}
           {feedback.stumpQ && (
             <div className="bg-yellow-50 p-2 rounded">
               <p className="text-xs font-semibold">Doctor's Question logged</p>
               <p className="text-xs italic">"{feedback.stumpQ}"</p>
+              <p className="text-xs text-gray-500 mt-1">Admin will answer soon</p>
             </div>
           )}
           <p className="text-xs text-gray-500">{TIER_GUIDANCE[feedback.newTier].advice}</p>
         </div>
-        {feedback.topicsAsked.length > 0 && (
-          <>
-            <h3 className="font-bold text-sm">Read more:</h3>
-            {feedback.topicsAsked.map(tk => {
-              const t = TOPICS.find(x => x.key === tk);
-              if (!t) return null;
-              return (
-                <div key={tk} onClick={async () => {
-                  const lessons = await db.getLessonsByCategory(t.cat);
-                  if (lessons.length > 0) goto('lessonView', { lessonId: lessons[0].id });
-                }} className="bg-white p-3 rounded card-shadow cursor-pointer flex justify-between items-center">
-                  <span className="text-sm">{t.label}</span>
-                  <span className="text-xs text-purple-700">Read</span>
-                </div>
-              );
-            })}
-          </>
-        )}
         <button onClick={() => goto('home')} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
       </div>
     );
@@ -1444,8 +1709,8 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
         <ChipGroup options={['2min','5min','10min+']} value={form.time_spent} onChange={v => setForm({...form, time_spent: v})} />
       </Field>
 
-      <Field label={'Interest: ' + form.interest + '/5'}>
-        <input type="range" min="1" max="5" value={form.interest} className="w-full" onChange={e => setForm({...form, interest: e.target.value})} />
+      <Field label="Interest level *">
+        <InterestPicker value={form.interest} onChange={v => setForm({...form, interest: v})} />
       </Field>
 
       <Field label="Referral likely?">
@@ -1470,7 +1735,6 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       <Field label="What did the doctor ask about?">
         <ChipGroup options={TOPICS.map(t => t.key)} getLabel={k => TOPICS.find(t => t.key === k)?.label || k}
           multi value={form.topics_asked} onChange={v => setForm({...form, topics_asked: v})} />
-        {form.topics_asked.length > 0 && <p className="text-xs text-purple-700 mt-1">+{form.topics_asked.length * 2} score</p>}
       </Field>
 
       <Field label="Doctor's Question (couldn't answer)">
@@ -1483,21 +1747,6 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
           max={new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0]}
           onChange={e => setForm({...form, next_followup: e.target.value})} />
       </Field>
-
-      <div className="bg-white p-3 rounded card-shadow">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.update_visit_time} onChange={e => setForm({...form, update_visit_time: e.target.checked})} />
-          Update best visit time?
-        </label>
-        {form.update_visit_time && (
-          <div className="space-y-2 mt-2">
-            <p className="text-xs">Days:</p>
-            <ChipGroup options={DAYS} multi value={form.visit_days} onChange={v => setForm({...form, visit_days: v})} />
-            <p className="text-xs mt-2">Hours:</p>
-            <ChipGroup options={HOURS} multi value={form.visit_hours} onChange={v => setForm({...form, visit_hours: v})} />
-          </div>
-        )}
-      </div>
 
       {gps && <p className="text-xs text-gray-500">GPS captured</p>}
       {!gps && <p className="text-xs text-orange-600">GPS not captured - enable location</p>}
@@ -1526,7 +1775,7 @@ function EditVisit({ user, goto, goBack, visitId }) {
       setVisit(v);
       setForm({
         met_status: v.met_status || '', time_spent: v.time_spent || '',
-        interest: v.interest || 3, referral_likely: v.referral_likely || '',
+        interest: v.interest || null, referral_likely: v.referral_likely || '',
         suspicious_cases: v.suspicious_cases || '', topics_asked: v.topics_asked || [],
         stump_question: v.stump_question || '', next_followup: v.next_followup || ''
       });
@@ -1572,8 +1821,8 @@ function EditVisit({ user, goto, goBack, visitId }) {
       <Field label="Time spent">
         <ChipGroup options={['2min','5min','10min+']} value={form.time_spent} onChange={v => setForm({...form, time_spent: v})} />
       </Field>
-      <Field label={'Interest: ' + form.interest + '/5'}>
-        <input type="range" min="1" max="5" value={form.interest} className="w-full" onChange={e => setForm({...form, interest: e.target.value})} />
+      <Field label="Interest level">
+        <InterestPicker value={form.interest} onChange={v => setForm({...form, interest: v})} />
       </Field>
       <Field label="Referral likely?">
         <ChipGroup options={['yes','maybe','no']} value={form.referral_likely} onChange={v => setForm({...form, referral_likely: v})} />
@@ -1644,7 +1893,7 @@ function Learn({ user, goto }) {
   );
 }
 
-function LessonView({ lessonId, user, goto, goBack }) {
+function LessonView({ lessonId, user, goto, goBack, mini }) {
   const [lesson, setLesson] = useState(null);
   useEffect(() => { db.getLessons().then(all => setLesson(all.find(l => l.id === lessonId))); }, [lessonId]);
   if (!lesson) return <p>Loading...</p>;
@@ -1653,31 +1902,47 @@ function LessonView({ lessonId, user, goto, goBack }) {
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-xl cion-primary-text">{lesson.title}</h2>
       <p className="text-xs text-gray-500">{lesson.category}{lesson.subcategory ? ' - ' + lesson.subcategory : ''}</p>
+      {mini && <p className="text-xs bg-purple-50 text-purple-700 p-2 rounded">Daily learning: 3 quick questions after this lesson</p>}
       <div className="bg-white p-4 rounded card-shadow text-sm leading-relaxed lesson-body"
         dangerouslySetInnerHTML={{ __html: parseMarkdown(lesson.body) }}></div>
-      <button onClick={() => goto('quiz', { lessonId: lesson.id })}
-        className="w-full cion-accent text-white py-3 rounded-lg font-bold">Take Quiz (10 MCQs)</button>
+      <button onClick={() => goto('quiz', { lessonId: lesson.id, mini })}
+        className="w-full cion-accent text-white py-3 rounded-lg font-bold">
+        {mini ? 'Take Daily Quiz (3 MCQs)' : 'Take Quiz (10 MCQs)'}
+      </button>
     </div>
   );
 }
 
-function Quiz({ lessonId, user, goto, goBack }) {
+function Quiz({ lessonId, user, goto, goBack, mini }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
 
-  useEffect(() => { db.getQuizQuestions(lessonId).then(setQuestions); }, [lessonId]);
+  useEffect(() => {
+    db.getQuizQuestions(lessonId).then(qs => {
+      if (mini && qs.length > 3) {
+        const shuffled = [...qs].sort(() => Math.random() - 0.5).slice(0, 3);
+        setQuestions(shuffled);
+      } else {
+        setQuestions(qs);
+      }
+    });
+  }, [lessonId, mini]);
 
   const submit = async () => {
     let s = 0;
     questions.forEach(q => { if (answers[q.id] === q.correct_index) s++; });
     setScore(s);
     setSubmitted(true);
-    await db.logQuizAttempt({
-      rep_id: user.id, lesson_id: lessonId,
-      score: s, total: questions.length, passed: (s / questions.length) >= 0.7
-    });
+    if (mini) {
+      await db.logDailyLearning(user.id, lessonId, s, questions.length);
+    } else {
+      await db.logQuizAttempt({
+        rep_id: user.id, lesson_id: lessonId,
+        score: s, total: questions.length, passed: (s / questions.length) >= 0.7
+      });
+    }
   };
 
   if (questions.length === 0) return (
@@ -1688,12 +1953,14 @@ function Quiz({ lessonId, user, goto, goBack }) {
   );
 
   if (submitted) {
-    const passed = (score / questions.length) >= 0.7;
+    const passThreshold = mini ? 0.66 : 0.7;
+    const passed = (score / questions.length) >= passThreshold;
     return (
       <div className="space-y-4">
         <div className={'p-6 rounded-lg text-center text-white ' + (passed ? 'bg-green-600' : 'bg-red-600')}>
           <p className="text-4xl font-bold">{score}/{questions.length}</p>
-          <p className="mt-2">{passed ? 'Passed!' : 'Try next time'}</p>
+          <p className="mt-2">{passed ? (mini ? 'Daily learning done!' : 'Passed!') : 'Try next time'}</p>
+          {mini && <p className="text-xs mt-2 opacity-80">Streak continues</p>}
         </div>
         {questions.map((q, i) => {
           const ua = answers[q.id]; const cor = q.correct_index;
@@ -1708,7 +1975,7 @@ function Quiz({ lessonId, user, goto, goBack }) {
             </div>
           );
         })}
-        <button onClick={goBack} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
+        <button onClick={() => goto('home')} className="w-full cion-primary text-white py-3 rounded font-bold">Done</button>
       </div>
     );
   }
@@ -1716,7 +1983,7 @@ function Quiz({ lessonId, user, goto, goBack }) {
   return (
     <div className="space-y-3">
       <BackButton goBack={goBack} />
-      <h2 className="font-bold text-lg cion-primary-text">Quiz</h2>
+      <h2 className="font-bold text-lg cion-primary-text">{mini ? 'Daily Quiz' : 'Quiz'}</h2>
       {questions.map((q, i) => (
         <div key={q.id} className="bg-white p-3 rounded card-shadow">
           <p className="font-semibold text-sm mb-2">{i+1}. {q.question}</p>
@@ -1729,7 +1996,63 @@ function Quiz({ lessonId, user, goto, goBack }) {
         </div>
       ))}
       <button onClick={submit} disabled={Object.keys(answers).length < questions.length}
-        className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">Submit Quiz</button>
+        className="w-full cion-accent text-white py-3 rounded-lg font-bold disabled:opacity-50">Submit</button>
+    </div>
+  );
+}
+
+function MyStumps({ user, goto, goBack }) {
+  const [stumps, setStumps] = useState([]);
+  const [allAnswered, setAllAnswered] = useState([]);
+  const [tab, setTab] = useState('mine');
+
+  useEffect(() => {
+    db.getStumpsForRep(user.id).then(setStumps);
+    db.getAllAnsweredStumps().then(setAllAnswered);
+  }, [user.id]);
+
+  return (
+    <div className="space-y-3">
+      <BackButton goBack={goBack} />
+      <h2 className="font-bold text-lg cion-primary-text">Doctor's Questions</h2>
+
+      <div className="flex gap-2">
+        <button onClick={() => setTab('mine')}
+          className={'flex-1 py-2 rounded text-sm ' + (tab === 'mine' ? 'cion-primary text-white' : 'bg-gray-200')}>My Questions</button>
+        <button onClick={() => setTab('all')}
+          className={'flex-1 py-2 rounded text-sm ' + (tab === 'all' ? 'cion-primary text-white' : 'bg-gray-200')}>Team FAQ</button>
+      </div>
+
+      {tab === 'mine' && (
+        stumps.length === 0 ? <p className="text-gray-500 text-sm">You haven't logged any stump questions yet.</p> :
+        stumps.map(s => (
+          <div key={s.id} className="bg-white p-3 rounded card-shadow">
+            <p className="text-xs text-gray-500">{new Date(s.visited_at).toLocaleDateString()} - {s.doctors?.name}</p>
+            <p className="text-sm font-semibold text-orange-800 mt-1">Q: {s.stump_question}</p>
+            {s.stump_answer ? (
+              <div className="bg-green-50 p-2 mt-2 rounded">
+                <p className="text-xs text-gray-500">Answered {new Date(s.stump_answered_at).toLocaleDateString()}</p>
+                <p className="text-sm text-green-800 mt-1">{s.stump_answer}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 italic mt-2">Awaiting admin answer</p>
+            )}
+          </div>
+        ))
+      )}
+
+      {tab === 'all' && (
+        allAnswered.length === 0 ? <p className="text-gray-500 text-sm">No answered questions yet.</p> :
+        allAnswered.map(s => (
+          <div key={s.id} className="bg-white p-3 rounded card-shadow">
+            <p className="text-xs text-gray-500">By {s.reps?.name} - re: {s.doctors?.name}</p>
+            <p className="text-sm font-semibold text-orange-800 mt-1">Q: {s.stump_question}</p>
+            <div className="bg-green-50 p-2 mt-2 rounded">
+              <p className="text-sm text-green-800">{s.stump_answer}</p>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -1740,11 +2063,12 @@ function Dashboard({ goto, goBack }) {
   if (!stats) return <p>Loading...</p>;
 
   const byRep = {};
-  stats.reps.forEach(r => byRep[r.id] = { id: r.id, name: r.name, visits: 0, doctorsMet: new Set(), doctorsAdded: 0, referrals: 0 });
+  stats.reps.forEach(r => byRep[r.id] = { id: r.id, name: r.name, visits: 0, doctorsMet: new Set(), doctorsAdded: 0, referrals: 0, sameLocFlags: 0 });
   stats.visits.forEach(v => {
     if (byRep[v.rep_id]) {
       byRep[v.rep_id].visits++;
       if (v.met_status === 'doctor') byRep[v.rep_id].doctorsMet.add(v.doctor_id);
+      if (v.same_location_flag) byRep[v.rep_id].sameLocFlags++;
     }
   });
   stats.doctors.forEach(d => { if (d.created_by && byRep[d.created_by]) byRep[d.created_by].doctorsAdded++; });
@@ -1766,7 +2090,7 @@ function Dashboard({ goto, goBack }) {
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold mb-2">Rep Performance (tap for details)</h3>
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-gray-500"><th>Rep</th><th>Added</th><th>Visits</th><th>Met</th><th>Refs</th></tr></thead>
+          <thead><tr className="text-left text-gray-500"><th>Rep</th><th>Added</th><th>Visits</th><th>Met</th><th>Refs</th><th>Flags</th></tr></thead>
           <tbody>
           {Object.values(byRep).map(r => (
             <tr key={r.name} onClick={() => goto('repPerformance', { repId: r.id })} className="border-t cursor-pointer hover:bg-purple-50">
@@ -1775,6 +2099,7 @@ function Dashboard({ goto, goBack }) {
               <td>{r.visits}</td>
               <td>{r.doctorsMet.size}</td>
               <td>{r.referrals}</td>
+              <td className={r.sameLocFlags > 0 ? 'text-orange-600 font-bold' : ''}>{r.sameLocFlags}</td>
             </tr>
           ))}
           </tbody>
@@ -1801,6 +2126,8 @@ function RepPerformance({ goto, goBack, repId }) {
   const [data, setData] = useState(null);
   const [repName, setRepName] = useState('');
   const [days, setDays] = useState(7);
+  const [learning, setLearning] = useState({ lastDate: null, streak: 0, missedDays: 0 });
+  const [gpsStatus, setGpsStatus] = useState({ totalActiveDays: 0, noGpsDays: 0 });
 
   useEffect(() => {
     (async () => {
@@ -1809,6 +2136,8 @@ function RepPerformance({ goto, goBack, repId }) {
       setRepName(rep?.name || '?');
       const d = await db.getRepPerformance(repId, days);
       setData(d);
+      setLearning(await db.getLearningSummary(repId));
+      setGpsStatus(await db.getRepGpsStatus(repId, days));
     })();
   }, [repId, days]);
 
@@ -1819,15 +2148,15 @@ function RepPerformance({ goto, goBack, repId }) {
   const metRate = totalVisits ? Math.round((metVisits / totalVisits) * 100) : 0;
   const avgPerDay = data.daysWorked ? (totalVisits / data.daysWorked).toFixed(1) : '0';
   const hotLeadsAdded = data.addedDocs.filter(d => d.tier === 'A').length;
-  const quizCount = data.attempts.length;
-  const quizPassed = data.attempts.filter(a => a.passed).length;
-  const quizAvg = data.attempts.length ? Math.round(data.attempts.reduce((s,a)=>s+a.score,0) / data.attempts.length / 10 * 100) : 0;
+  const sameLocCount = data.visits.filter(v => v.same_location_flag).length;
   const stumpCount = data.visits.filter(v => v.stump_question).length;
 
   const flags = [];
   if (data.daysWorked < 4 && days === 7) flags.push('Only ' + data.daysWorked + ' working days in 7');
   if (metRate < 40 && totalVisits > 5) flags.push('Met rate < 40%');
-  if (quizCount === 0) flags.push('No quiz attempts');
+  if (gpsStatus.noGpsDays > 0) flags.push('No GPS on ' + gpsStatus.noGpsDays + ' day(s) - check permissions');
+  if (sameLocCount >= 3) flags.push(sameLocCount + ' visits flagged for same-location pattern');
+  if (learning.missedDays >= 3) flags.push('Missed daily learning ' + learning.missedDays + ' day(s)');
   if (stumpCount > 2) flags.push(stumpCount + ' stump questions - may need training');
 
   return (
@@ -1838,7 +2167,7 @@ function RepPerformance({ goto, goBack, repId }) {
       <ChipGroup options={[7, 14, 30]} value={days} onChange={setDays} getLabel={d => d + ' days'} />
 
       <div className="grid grid-cols-2 gap-2">
-        <StatBox label="Days Worked" val={`${data.daysWorked}/${days-Math.floor(days/7)}`} />
+        <StatBox label="Days Worked" val={`${data.daysWorked}`} />
         <StatBox label="Visits" val={totalVisits} />
         <StatBox label="Doctors Met" val={metVisits} />
         <StatBox label="Referrals" val={data.referrals.length} />
@@ -1850,14 +2179,15 @@ function RepPerformance({ goto, goBack, repId }) {
         <div className="flex justify-between text-sm"><span>Avg visits/day</span><span className="font-bold">{avgPerDay}</span></div>
         <div className="flex justify-between text-sm"><span>Hot leads added</span><span className="font-bold">{hotLeadsAdded}</span></div>
         <div className="flex justify-between text-sm"><span>New doctors added</span><span className="font-bold">{data.addedDocs.length}</span></div>
+        <div className="flex justify-between text-sm"><span>Same-location flags</span><span className={'font-bold ' + (sameLocCount > 0 ? 'text-orange-600' : '')}>{sameLocCount}</span></div>
       </div>
 
       <div className="bg-white p-4 rounded-lg card-shadow space-y-2">
         <h3 className="font-semibold text-sm">Learning</h3>
-        <div className="flex justify-between text-sm"><span>Quiz attempts</span><span className="font-bold">{quizCount}</span></div>
-        <div className="flex justify-between text-sm"><span>Passed</span><span className="font-bold">{quizPassed}</span></div>
-        <div className="flex justify-between text-sm"><span>Avg score</span><span className="font-bold">{quizAvg}%</span></div>
-        <div className="flex justify-between text-sm"><span>Stump questions</span><span className="font-bold">{stumpCount}</span></div>
+        <div className="flex justify-between text-sm"><span>Current streak</span><span className="font-bold">{learning.streak} days</span></div>
+        <div className="flex justify-between text-sm"><span>Last learning</span><span className="font-bold">{learning.lastDate || 'Never'}</span></div>
+        <div className="flex justify-between text-sm"><span>Missed days (last 7)</span><span className={'font-bold ' + (learning.missedDays >= 3 ? 'text-orange-600' : '')}>{learning.missedDays}</span></div>
+        <div className="flex justify-between text-sm"><span>Stump questions logged</span><span className="font-bold">{stumpCount}</span></div>
       </div>
 
       {flags.length > 0 && (
@@ -1869,15 +2199,22 @@ function RepPerformance({ goto, goBack, repId }) {
 
       <div className="bg-white p-4 rounded-lg card-shadow">
         <h3 className="font-semibold text-sm mb-2">Recent Visits</h3>
-        {data.visits.slice(0, 10).map(v => (
-          <div key={v.id} className="border-b py-1 last:border-0 text-xs">
-            <div className="flex justify-between"><span>{v.doctors?.name}</span><span>{new Date(v.visited_at).toLocaleDateString()}</span></div>
-            <div className="text-gray-500">
-              {v.met_status === 'doctor' ? 'Met' : v.met_status === 'staff' ? 'Staff' : 'Not met'} - I{v.interest}/5
-              {v.topics_asked?.length > 0 && ' - ' + v.topics_asked.length + ' topics'}
+        {data.visits.slice(0, 10).map(v => {
+          const interestLabel = INTEREST_OPTIONS.find(o => o.value === v.interest)?.label || `${v.interest}/5`;
+          return (
+            <div key={v.id} className="border-b py-1 last:border-0 text-xs">
+              <div className="flex justify-between">
+                <span onClick={() => goto('doctorDetail', { doctorId: v.doctors?.id })} className="text-purple-700 underline cursor-pointer">{v.doctors?.name}</span>
+                <span>{new Date(v.visited_at).toLocaleDateString()}</span>
+              </div>
+              <div className="text-gray-500">
+                {v.met_status === 'doctor' ? 'Met' : v.met_status === 'staff' ? 'Staff' : 'Not met'} - {interestLabel}
+                {v.topics_asked?.length > 0 && ' - ' + v.topics_asked.length + ' topics'}
+                {v.same_location_flag && <span className="text-orange-600 ml-1">(same-loc)</span>}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1908,7 +2245,9 @@ function PendingEditsQueue({ user, goto, goBack }) {
        edits.length === 0 ? <p className="text-gray-500">No pending edits.</p> :
        edits.map(e => (
         <div key={e.id} className="bg-white p-3 rounded card-shadow">
-          <p className="font-semibold">{e.doctors?.name}</p>
+          <p className="font-semibold">
+            <span onClick={() => goto('doctorDetail', { doctorId: e.doctor_id })} className="text-purple-700 underline cursor-pointer">{e.doctors?.name}</span>
+          </p>
           <p className="text-xs text-gray-500">By {e.reps?.name} on {new Date(e.created_at).toLocaleString()}</p>
           <pre className="text-xs bg-gray-50 p-2 mt-2 rounded overflow-auto">{JSON.stringify(e.changes, null, 2)}</pre>
           <div className="flex gap-2 mt-2">
@@ -2017,6 +2356,118 @@ function CompetitorMap({ goto, goBack }) {
         </div>
        ))
       }
+    </div>
+  );
+}
+
+function IncompleteAdmin({ goto, goBack }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    db.getIncompleteDoctors(null, true).then(d => { setDocs(d); setLoading(false); });
+  }, []);
+
+  const byRep = {};
+  docs.forEach(d => {
+    const repName = d.reps?.name || 'Unknown';
+    if (!byRep[repName]) byRep[repName] = [];
+    byRep[repName].push(d);
+  });
+
+  return (
+    <div className="space-y-3">
+      <BackButton goBack={goBack} />
+      <h2 className="font-bold text-lg cion-primary-text">Incomplete Doctors</h2>
+      <p className="text-xs text-gray-500">Critical missing fields: mobile, specialty, clinic name, zone, visit days. Reps see their own list as banner on home.</p>
+      {loading ? <p>Loading...</p> :
+       Object.keys(byRep).length === 0 ? <p className="text-gray-500">All doctor profiles complete!</p> :
+       Object.entries(byRep).map(([repName, list]) => (
+        <div key={repName} className="bg-white p-3 rounded card-shadow">
+          <h3 className="font-semibold text-sm mb-2">{repName} ({list.length})</h3>
+          {list.map(d => (
+            <div key={d.id} onClick={() => goto('doctorDetail', { doctorId: d.id })}
+              className="border-b py-2 last:border-0 cursor-pointer">
+              <p className="text-sm font-semibold text-purple-700 underline">{d.name}</p>
+              <p className="text-xs text-gray-500">{d.specialty || 'no specialty'} - {d.zones?.name || 'no zone'}</p>
+              <p className="text-xs text-orange-600">Missing: {isIncomplete(d).join(', ')}</p>
+            </div>
+          ))}
+        </div>
+       ))
+      }
+    </div>
+  );
+}
+
+function StumpsAdmin({ user, goto, goBack }) {
+  const [stumps, setStumps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('open');
+  const [editing, setEditing] = useState(null);
+  const [answer, setAnswer] = useState('');
+
+  const load = () => db.getStumpsAdmin().then(d => { setStumps(d); setLoading(false); });
+  useEffect(() => { load(); }, []);
+
+  const filtered = stumps.filter(s => filter === 'all' ? true : filter === 'open' ? !s.stump_answer : !!s.stump_answer);
+
+  const submitAnswer = async () => {
+    if (!answer.trim()) { alert('Answer required'); return; }
+    await db.answerStump(editing.id, answer, user.id);
+    setEditing(null);
+    setAnswer('');
+    load();
+  };
+
+  return (
+    <div className="space-y-3">
+      <BackButton goBack={goBack} />
+      <h2 className="font-bold text-lg cion-primary-text">Doctor's Questions (Stumps)</h2>
+
+      <div className="flex gap-2">
+        {['open','answered','all'].map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={'flex-1 py-2 rounded text-sm capitalize ' + (filter === f ? 'cion-primary text-white' : 'bg-gray-200')}>{f}</button>
+        ))}
+      </div>
+
+      {loading ? <p>Loading...</p> :
+       filtered.length === 0 ? <p className="text-gray-500">None.</p> :
+       filtered.map(s => (
+        <div key={s.id} className="bg-white p-3 rounded card-shadow">
+          <p className="text-xs text-gray-500">
+            {new Date(s.visited_at).toLocaleDateString()} - by {s.reps?.name} - re:{' '}
+            <span onClick={() => goto('doctorDetail', { doctorId: s.doctor_id })} className="text-purple-700 underline cursor-pointer">{s.doctors?.name}</span>
+          </p>
+          <p className="text-sm font-semibold text-orange-800 mt-1">Q: {s.stump_question}</p>
+          {s.stump_answer ? (
+            <div className="bg-green-50 p-2 mt-2 rounded">
+              <p className="text-xs text-gray-500">Answered {new Date(s.stump_answered_at).toLocaleDateString()}</p>
+              <p className="text-sm text-green-800 mt-1">{s.stump_answer}</p>
+              <button onClick={() => { setEditing(s); setAnswer(s.stump_answer); }} className="text-xs text-purple-700 underline mt-1">Edit answer</button>
+            </div>
+          ) : (
+            <button onClick={() => { setEditing(s); setAnswer(''); }} className="mt-2 cion-primary text-white px-3 py-1 rounded text-xs">Answer this</button>
+          )}
+        </div>
+       ))
+      }
+
+      {editing && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end z-50">
+          <div className="bg-white w-full p-4 rounded-t-xl space-y-3 max-h-[80vh] overflow-auto">
+            <h3 className="font-bold cion-primary-text">Answer Stump</h3>
+            <p className="text-xs text-gray-500">Visible to all reps in Team FAQ</p>
+            <p className="text-sm bg-orange-50 p-2 rounded">Q: {editing.stump_question}</p>
+            <textarea className="input" rows="4" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Your answer..." />
+            <div className="flex gap-2">
+              <button onClick={submitAnswer} className="flex-1 cion-primary text-white py-2 rounded font-bold">Save</button>
+              <button onClick={() => { setEditing(null); setAnswer(''); }} className="flex-1 bg-gray-300 py-2 rounded">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
