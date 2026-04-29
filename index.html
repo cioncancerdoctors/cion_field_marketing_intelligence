@@ -37,7 +37,7 @@
 <script type="text/babel" data-presets="react">
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.8.0';
+const APP_VERSION = 'v2.8.1';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
@@ -93,6 +93,29 @@ function parseMarkdown(text) {
   safe = safe.replace(/(^|[^*])\*([^*]+?)\*(?!\*)/g, '$1<em>$2</em>');
   safe = safe.replace(/\n/g, '<br/>');
   return safe;
+}
+
+
+const NULLABLE_FIELDS = {
+  visits: ['time_spent','phone_status','phone_captured','referral_likely','suspicious_cases','stump_question','stump_answer','met_status','outcome','notes'],
+  doctors: ['mobile','clinic_name','waiting_room','area_class','does_biopsy_inhouse','refers_to','closed_reason','tier','patient_load'],
+  referrals: ['patient_name','notes'],
+  pending_edits: []
+};
+
+function sanitize(table, obj) {
+  if (!obj) return obj;
+  const out = { ...obj };
+  const fields = NULLABLE_FIELDS[table] || [];
+  for (const k of fields) {
+    if (out[k] === undefined || out[k] === null) {
+      out[k] = null;
+    } else if (typeof out[k] === 'string') {
+      const trimmed = out[k].trim();
+      out[k] = trimmed === '' ? null : trimmed;
+    }
+  }
+  return out;
 }
 
 function distanceMeters(lat1, lng1, lat2, lng2) {
@@ -193,8 +216,8 @@ const db = {
       .eq('zone_id', zoneId).eq('created_by', repId);
     return data || [];
   },
-  async addDoctor(doc) { return await supa.from('doctors').insert([doc]).select().single(); },
-  async updateDoctor(id, updates) { return await supa.from('doctors').update(updates).eq('id', id); },
+  async addDoctor(doc) { return await supa.from('doctors').insert([sanitize('doctors', doc)]).select().single(); },
+  async updateDoctor(id, updates) { return await supa.from('doctors').update(sanitize('doctors', updates)).eq('id', id); },
   async closeDoctor(id, reason) { return await supa.from('doctors').update({ is_closed: true, closed_reason: reason }).eq('id', id); },
   async reopenDoctor(id) { return await supa.from('doctors').update({ is_closed: false, closed_reason: null }).eq('id', id); },
   async getStubDoctors(repId, isAdmin) {
@@ -245,9 +268,9 @@ const db = {
     const { data } = await supa.from('visits').select('*, doctors(name, clinic_name)').eq('id', id).maybeSingle();
     return data;
   },
-  async addVisit(visit) { return await supa.from('visits').insert([visit]).select().single(); },
+  async addVisit(visit) { return await supa.from('visits').insert([sanitize('visits', visit)]).select().single(); },
   async updateVisit(id, updates) {
-    return await supa.from('visits').update({ ...updates, edited_at: new Date().toISOString() }).eq('id', id);
+    return await supa.from('visits').update(sanitize('visits', { ...updates, edited_at: new Date().toISOString() })).eq('id', id);
   },
   async getYesterdayVisits(repId = null, isAdmin = false) {
     const yesterday = new Date();
@@ -357,7 +380,7 @@ const db = {
     const noGpsDays = Object.values(daysByGps).filter(d => d.total > 0 && d.withGps === 0).length;
     return { totalActiveDays: Object.keys(daysByGps).length, noGpsDays };
   },
-  async addReferral(ref) { return await supa.from('referrals').insert([ref]).select().single(); },
+  async addReferral(ref) { return await supa.from('referrals').insert([sanitize('referrals', ref)]).select().single(); },
   async getLessons() {
     const { data } = await supa.from('lessons').select('*').eq('active', true).order('display_order');
     return data || [];
@@ -1373,7 +1396,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     setSaving(true);
     const payload = {
       ...form,
-      op_fee: form.op_fee ? parseInt(form.op_fee) : null,
+      op_fee: form.op_fee !== '' && form.op_fee != null ? parseInt(form.op_fee) : null,
       zone_id: form.zone_id ? parseInt(form.zone_id) : null,
       does_biopsy_inhouse: form.does_biopsy_inhouse || null
     };
