@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -37,7 +37,7 @@
 <script type="text/babel" data-presets="react">
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.8.1';
+const APP_VERSION = 'v2.8.2';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
@@ -236,7 +236,7 @@ const db = {
     return await supa.from('pending_edits').insert([{ doctor_id: doctorId, rep_id: repId, changes }]);
   },
   async getPendingEdits() {
-    const { data } = await supa.from('pending_edits').select('*, doctors(name), reps(name)').eq('status','pending').order('created_at');
+    const { data } = await supa.from('pending_edits').select('*, doctors:doctor_id(name), reps:rep_id(name)').eq('status','pending').order('created_at');
     return data || [];
   },
   async approveEdit(editId, doctorId, changes, reviewerId) {
