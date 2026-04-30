@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -37,7 +37,7 @@
 <script type="text/babel" data-presets="react">
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.8.2';
+const APP_VERSION = 'v2.9.0';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
@@ -268,7 +268,22 @@ const db = {
     const { data } = await supa.from('visits').select('*, doctors(name, clinic_name)').eq('id', id).maybeSingle();
     return data;
   },
-  async addVisit(visit) { return await supa.from('visits').insert([sanitize('visits', visit)]).select().single(); },
+  async addVisit(visit) {
+    // Duplicate guard: reject if same rep + same doctor in last 5 min
+    if (visit.rep_id && visit.doctor_id) {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: recent } = await supa.from('visits')
+        .select('id')
+        .eq('rep_id', visit.rep_id)
+        .eq('doctor_id', visit.doctor_id)
+        .gte('visited_at', fiveMinAgo)
+        .limit(1);
+      if (recent && recent.length > 0) {
+        return { data: null, error: { message: 'This visit was already logged in the last 5 minutes.' } };
+      }
+    }
+    return await supa.from('visits').insert([sanitize('visits', visit)]).select().single();
+  },
   async updateVisit(id, updates) {
     return await supa.from('visits').update(sanitize('visits', { ...updates, edited_at: new Date().toISOString() })).eq('id', id);
   },
@@ -330,7 +345,7 @@ const db = {
   },
   async getAdminTodayOverview() {
     const { data: pending } = await supa.from('pending_edits').select('id').eq('status','pending');
-    const { data: stumps } = await supa.from('visits').select('id').not('stump_question','is',null).neq('stump_question','');
+    const { data: stumps } = await supa.from('visits').select('id').not('stump_question','is',null).neq('stump_question','').or('stump_status.is.null,stump_status.eq.open');
     const { data: doctors } = await supa.from('doctors').select('id, tier, is_closed').or('is_closed.is.null,is_closed.eq.false');
     const today = new Date().toISOString().split('T')[0];
     const { data: followups } = await supa.from('doctors').select('id').lte('next_followup', today).not('next_followup','is', null).or('is_closed.is.null,is_closed.eq.false');
@@ -454,15 +469,22 @@ const db = {
   },
   async getStumpsAdmin() {
     const { data } = await supa.from('visits')
-      .select('id, stump_question, stump_answer, stump_answered_at, visited_at, doctor_id, rep_id, doctors(name), reps(name)')
+      .select('id, stump_question, stump_answer, stump_answered_at, stump_status, visited_at, doctor_id, rep_id, doctors:doctor_id(name), reps:rep_id(name)')
       .not('stump_question','is',null).neq('stump_question','')
       .order('visited_at', { ascending: false });
     return data || [];
   },
+  async markStumpsIrrelevant(visitIds) {
+    return await supa.from('visits').update({ stump_status: 'irrelevant' }).in('id', visitIds);
+  },
+  async unmarkStumpIrrelevant(visitId) {
+    return await supa.from('visits').update({ stump_status: 'open' }).eq('id', visitId);
+  },
   async answerStump(visitId, answer, answeredBy) {
     return await supa.from('visits').update({
       stump_answer: answer,
-      stump_answered_at: new Date().toISOString()
+      stump_answered_at: new Date().toISOString(),
+      stump_status: 'answered'
     }).eq('id', visitId);
   },
   async getStumpsForRep(repId) {
@@ -2429,11 +2451,41 @@ function StumpsAdmin({ user, goto, goBack }) {
   const [filter, setFilter] = useState('open');
   const [editing, setEditing] = useState(null);
   const [answer, setAnswer] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = () => db.getStumpsAdmin().then(d => { setStumps(d); setLoading(false); });
   useEffect(() => { load(); }, []);
 
-  const filtered = stumps.filter(s => filter === 'all' ? true : filter === 'open' ? !s.stump_answer : !!s.stump_answer);
+  const getStatus = (s) => s.stump_status || (s.stump_answer ? 'answered' : 'open');
+
+  const filtered = stumps.filter(s => {
+    const st = getStatus(s);
+    if (filter === 'all') return true;
+    return st === filter;
+  });
+
+  const toggleSelect = (id) => {
+    const n = new Set(selected);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setSelected(n);
+  };
+
+  const selectAllVisible = () => {
+    const ids = filtered.map(s => s.id);
+    if (ids.every(i => selected.has(i))) setSelected(new Set());
+    else setSelected(new Set([...selected, ...ids]));
+  };
+
+  const bulkMarkIrrelevant = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`Mark ${selected.size} stump(s) as irrelevant?`)) return;
+    setBulkBusy(true);
+    await db.markStumpsIrrelevant([...selected]);
+    setSelected(new Set());
+    setBulkBusy(false);
+    load();
+  };
 
   const submitAnswer = async () => {
     if (!answer.trim()) { alert('Answer required'); return; }
@@ -2443,38 +2495,73 @@ function StumpsAdmin({ user, goto, goBack }) {
     load();
   };
 
+  const reopenStump = async (id) => {
+    await db.unmarkStumpIrrelevant(id);
+    load();
+  };
+
   return (
     <div className="space-y-3">
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Doctor's Questions (Stumps)</h2>
 
       <div className="flex gap-2">
-        {['open','answered','all'].map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={'flex-1 py-2 rounded text-sm capitalize ' + (filter === f ? 'cion-primary text-white' : 'bg-gray-200')}>{f}</button>
+        {['open','answered','irrelevant','all'].map(f => (
+          <button key={f} onClick={() => { setFilter(f); setSelected(new Set()); }}
+            className={'flex-1 py-2 rounded text-xs capitalize ' + (filter === f ? 'cion-primary text-white' : 'bg-gray-200')}>{f}</button>
         ))}
       </div>
 
-      {loading ? <p>Loading...</p> :
-       filtered.length === 0 ? <p className="text-gray-500">None.</p> :
-       filtered.map(s => (
-        <div key={s.id} className="bg-white p-3 rounded card-shadow">
-          <p className="text-xs text-gray-500">
-            {new Date(s.visited_at).toLocaleDateString()} - by {s.reps?.name} - re:{' '}
-            <span onClick={() => goto('doctorDetail', { doctorId: s.doctor_id })} className="text-purple-700 underline cursor-pointer">{s.doctors?.name}</span>
-          </p>
-          <p className="text-sm font-semibold text-orange-800 mt-1">Q: {s.stump_question}</p>
-          {s.stump_answer ? (
-            <div className="bg-green-50 p-2 mt-2 rounded">
-              <p className="text-xs text-gray-500">Answered {new Date(s.stump_answered_at).toLocaleDateString()}</p>
-              <p className="text-sm text-green-800 mt-1">{s.stump_answer}</p>
-              <button onClick={() => { setEditing(s); setAnswer(s.stump_answer); }} className="text-xs text-purple-700 underline mt-1">Edit answer</button>
-            </div>
-          ) : (
-            <button onClick={() => { setEditing(s); setAnswer(''); }} className="mt-2 cion-primary text-white px-3 py-1 rounded text-xs">Answer this</button>
+      {filter === 'open' && filtered.length > 0 && (
+        <div className="bg-purple-50 p-2 rounded flex items-center gap-2 text-xs">
+          <button onClick={selectAllVisible} className="underline text-purple-700">
+            {filtered.every(s => selected.has(s.id)) ? 'Deselect all' : 'Select all'}
+          </button>
+          <span className="flex-1 text-gray-600">{selected.size} selected</span>
+          {selected.size > 0 && (
+            <button onClick={bulkMarkIrrelevant} disabled={bulkBusy}
+              className="bg-red-600 text-white px-3 py-1 rounded font-bold disabled:opacity-50">
+              {bulkBusy ? '...' : 'Mark irrelevant'}
+            </button>
           )}
         </div>
-       ))
+      )}
+
+      {loading ? <p>Loading...</p> :
+       filtered.length === 0 ? <p className="text-gray-500">None.</p> :
+       filtered.map(s => {
+         const st = getStatus(s);
+         return (
+          <div key={s.id} className={'bg-white p-3 rounded card-shadow ' + (st === 'irrelevant' ? 'opacity-60' : '')}>
+            <div className="flex items-start gap-2">
+              {st === 'open' && (
+                <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelect(s.id)} className="mt-1" />
+              )}
+              <div className="flex-1">
+                <p className="text-xs text-gray-500">
+                  {new Date(s.visited_at).toLocaleDateString()} - by {s.reps?.name} - re:{' '}
+                  <span onClick={() => goto('doctorDetail', { doctorId: s.doctor_id })} className="text-purple-700 underline cursor-pointer">{s.doctors?.name}</span>
+                  {st === 'irrelevant' && <span className="ml-2 text-red-600">(irrelevant)</span>}
+                </p>
+                <p className="text-sm font-semibold text-orange-800 mt-1">Q: {s.stump_question}</p>
+                {s.stump_answer && st === 'answered' && (
+                  <div className="bg-green-50 p-2 mt-2 rounded">
+                    <p className="text-xs text-gray-500">Answered {new Date(s.stump_answered_at).toLocaleDateString()}</p>
+                    <p className="text-sm text-green-800 mt-1">{s.stump_answer}</p>
+                    <button onClick={() => { setEditing(s); setAnswer(s.stump_answer); }} className="text-xs text-purple-700 underline mt-1">Edit answer</button>
+                  </div>
+                )}
+                {st === 'open' && (
+                  <button onClick={() => { setEditing(s); setAnswer(''); }} className="mt-2 cion-primary text-white px-3 py-1 rounded text-xs">Answer this</button>
+                )}
+                {st === 'irrelevant' && (
+                  <button onClick={() => reopenStump(s.id)} className="mt-2 bg-gray-300 px-3 py-1 rounded text-xs">Mark as open</button>
+                )}
+              </div>
+            </div>
+          </div>
+         );
+       })
       }
 
       {editing && (
