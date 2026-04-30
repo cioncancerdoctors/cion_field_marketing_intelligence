@@ -37,7 +37,7 @@
 <script type="text/babel" data-presets="react">
 const SUPABASE_URL = 'https://bhaarkeecvidorkndqfa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_I8fNUTwdPbttnbXHxv6uzA_9yl-5jSi';
-const APP_VERSION = 'v2.9.0';
+const APP_VERSION = 'v3.0.0';
 const REP_PASSWORD = 'Cion@12345';
 const ADMIN_PASSWORD = 'Cion@54321';
 const DAILY_TARGET = 10;
@@ -118,6 +118,32 @@ function sanitize(table, obj) {
   return out;
 }
 
+
+const toast = {
+  show(msg, type = 'info') {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    div.className = 'fixed top-16 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg text-sm text-white max-w-sm';
+    div.style.background = type === 'error' ? '#dc2626' : type === 'success' ? '#16a34a' : '#4B1E6B';
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 3500);
+  },
+  success(msg) { this.show(msg, 'success'); },
+  error(msg) { this.show(msg, 'error'); }
+};
+
+const activityLog = {
+  key: 'cion_activity_log',
+  add(entry) {
+    const log = this.all();
+    log.unshift({ ...entry, ts: Date.now() });
+    if (log.length > 20) log.length = 20;
+    localStorage.setItem(this.key, JSON.stringify(log));
+  },
+  all() { try { return JSON.parse(localStorage.getItem(this.key) || '[]'); } catch { return []; } },
+  clear() { localStorage.removeItem(this.key); }
+};
+
 function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const toRad = d => d * Math.PI / 180;
@@ -169,15 +195,21 @@ function Icon({ name, size = 16, className = '' }) {
 
 const db = {
   async getReps() {
-    const { data } = await supa.from('reps').select('*').eq('active', true).order('name');
+    const { data } = await supa.from('reps').select('*, cities:home_city_id(id, name)').eq('active', true).order('name');
     return data || [];
   },
   async findRepByName(name) {
-    const { data } = await supa.from('reps').select('*').ilike('name', name.trim()).eq('active', true).maybeSingle();
+    const { data } = await supa.from('reps').select('*, cities:home_city_id(id, name)').ilike('name', name.trim()).eq('active', true).maybeSingle();
     return data;
   },
-  async getZones() {
-    const { data } = await supa.from('zones').select('*').order('name');
+  async getZones(cityId = null) {
+    let q = supa.from('zones').select('*, cities(name)').order('name');
+    if (cityId) q = q.eq('city_id', cityId);
+    const { data } = await q;
+    return data || [];
+  },
+  async getCities() {
+    const { data } = await supa.from('cities').select('*').order('name');
     return data || [];
   },
   async getDoctors(repId = null, isAdmin = false, includeClosed = false) {
@@ -914,10 +946,14 @@ function RepHome({ user, goto }) {
         </div>
       </div>
 
+      <PendingSyncWidget />
+
       <button onClick={() => goto('logVisit')}
         className="w-full cion-accent text-white py-5 rounded-xl font-bold text-lg shadow-lg">
         + Log New Visit
       </button>
+
+      <RecentActivityWidget />
 
       {highPotential.length > 0 && (
         <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
@@ -1116,7 +1152,9 @@ function DoctorList({ user, goto, goBack }) {
   const [showClosed, setShowClosed] = useState(false);
   const [reps, setReps] = useState([]);
   const [zones, setZones] = useState([]);
+  const [cities, setCities] = useState([]);
   const [filterRep, setFilterRep] = useState('');
+  const [filterCity, setFilterCity] = useState('');
   const [filterZone, setFilterZone] = useState('');
   const [filterSpec, setFilterSpec] = useState('');
   const isAdmin = user.role === 'admin';
@@ -1130,7 +1168,9 @@ function DoctorList({ user, goto, goBack }) {
         setReps(r.filter(x => x.role === 'rep'));
       }
       const z = await db.getZones();
+      const c = await db.getCities();
       setZones(z);
+      setCities(c);
       setLoading(false);
     })();
   }, [user.id, showClosed]);
@@ -1138,6 +1178,10 @@ function DoctorList({ user, goto, goBack }) {
   const filtered = docs.filter(d => {
     if (search && !d.name.toLowerCase().includes(search.toLowerCase()) && !(d.clinic_name || '').toLowerCase().includes(search.toLowerCase())) return false;
     if (isAdmin && filterRep && d.created_by !== filterRep) return false;
+    if (filterCity) {
+      const z = zones.find(zz => zz.id === d.zone_id);
+      if (!z || String(z.city_id) !== filterCity) return false;
+    }
     if (filterZone && String(d.zone_id) !== filterZone) return false;
     if (filterSpec && d.specialty !== filterSpec) return false;
     return true;
@@ -1150,35 +1194,26 @@ function DoctorList({ user, goto, goBack }) {
         <button onClick={() => goto('addDoctor')} className="cion-accent text-white px-4 rounded font-bold">+ Add</button>
       </div>
 
-      {isAdmin && (
-        <div className="grid grid-cols-3 gap-2">
-          <select className="input text-xs" value={filterRep} onChange={e => setFilterRep(e.target.value)}>
+      <div className="grid grid-cols-2 gap-2">
+        {isAdmin && (
+          <select className="input text-xs col-span-2" value={filterRep} onChange={e => setFilterRep(e.target.value)}>
             <option value="">All Reps</option>
             {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
-          <select className="input text-xs" value={filterZone} onChange={e => setFilterZone(e.target.value)}>
-            <option value="">All Zones</option>
-            {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
-          </select>
-          <select className="input text-xs" value={filterSpec} onChange={e => setFilterSpec(e.target.value)}>
-            <option value="">All Specs</option>
-            {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
-          </select>
-        </div>
-      )}
-
-      {!isAdmin && (
-        <div className="grid grid-cols-2 gap-2">
-          <select className="input text-xs" value={filterZone} onChange={e => setFilterZone(e.target.value)}>
-            <option value="">All Zones</option>
-            {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
-          </select>
-          <select className="input text-xs" value={filterSpec} onChange={e => setFilterSpec(e.target.value)}>
-            <option value="">All Specs</option>
-            {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
-          </select>
-        </div>
-      )}
+        )}
+        <select className="input text-xs" value={filterCity} onChange={e => { setFilterCity(e.target.value); setFilterZone(''); }}>
+          <option value="">All Cities</option>
+          {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="input text-xs" value={filterZone} onChange={e => setFilterZone(e.target.value)}>
+          <option value="">All Zones</option>
+          {zones.filter(z => !filterCity || String(z.city_id) === filterCity).map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+        </select>
+        <select className="input text-xs col-span-2" value={filterSpec} onChange={e => setFilterSpec(e.target.value)}>
+          <option value="">All Specialties</option>
+          {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
+        </select>
+      </div>
 
       <label className="flex items-center gap-2 text-xs text-gray-600">
         <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} />
@@ -1378,6 +1413,8 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
   const isEdit = !!doctorId;
   const isAdmin = user.role === 'admin';
   const [zones, setZones] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [cityId, setCityId] = useState('');
   const [original, setOriginal] = useState(null);
   const [dupes, setDupes] = useState([]);
   const [form, setForm] = useState({
@@ -1389,6 +1426,7 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    db.getCities().then(setCities);
     db.getZones().then(setZones);
     if (isEdit) {
       db.getDoctorById(doctorId).then(d => {
@@ -1402,8 +1440,18 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
             refers_to: d.refers_to || '',
             visit_days: d.visit_days || [], visit_hours: d.visit_hours || []
           });
+          // Auto-set city from existing zone
+          if (d.zone_id) {
+            db.getZones().then(zs => {
+              const z = zs.find(x => x.id === d.zone_id);
+              if (z?.city_id) setCityId(String(z.city_id));
+            });
+          }
         }
       });
+    } else {
+      // New doctor: default city to rep's home city
+      if (user.home_city_id) setCityId(String(user.home_city_id));
     }
   }, [doctorId]);
 
@@ -1433,18 +1481,21 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
 
       if (isAdmin) {
         await db.updateDoctor(doctorId, changes);
-        alert('Updated');
+        toast.success('Updated');
+        activityLog.add({ type: 'doctor_edit', doctor: form.name });
       } else {
         if (original.is_stub) {
           await db.updateDoctor(doctorId, changes);
-          alert('Doctor details completed');
+          toast.success('Doctor details completed');
+          activityLog.add({ type: 'doctor_complete', doctor: form.name });
         } else {
           if (!navigator.onLine) {
             queue.add({ type: 'pending_edit', data: { doctor_id: doctorId, rep_id: user.id, changes }});
             alert('Edit queued offline.');
           } else {
             await db.addPendingEdit(doctorId, user.id, changes);
-            alert('Edit submitted for admin approval.');
+            toast.success('Submitted for admin approval');
+            activityLog.add({ type: 'edit_pending', doctor: form.name });
           }
         }
       }
@@ -1467,7 +1518,9 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
     }
     const { error } = await db.addDoctor(payload);
     setSaving(false);
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) { toast.error(error.message); return; }
+    activityLog.add({ type: 'doctor_added', doctor: payload.name });
+    toast.success('Doctor saved');
     goBack();
   };
 
@@ -1492,9 +1545,14 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
         {SPECIALTIES.map(s => <option key={s}>{s}</option>)}
       </select></Field>
 
-      <Field label="Zone *"><select className="input" value={form.zone_id} onChange={e => setForm({...form, zone_id: e.target.value})}>
-        <option value="">Select...</option>
-        {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+      <Field label="City *"><select className="input" value={cityId} onChange={e => { setCityId(e.target.value); setForm({...form, zone_id: ''}); }}>
+        <option value="">Select city...</option>
+        {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select></Field>
+
+      <Field label="Zone *"><select className="input" value={form.zone_id} onChange={e => setForm({...form, zone_id: e.target.value})} disabled={!cityId}>
+        <option value="">{cityId ? 'Select zone...' : 'Select city first'}</option>
+        {zones.filter(z => !cityId || String(z.city_id) === cityId).map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
       </select></Field>
 
       <Field label="Mobile (10-digit) *"><input className="input" type="tel" maxLength="10" value={form.mobile} onChange={e => setForm({...form, mobile: e.target.value.replace(/\D/g,'')})} /></Field>
@@ -1526,6 +1584,8 @@ function DoctorForm({ user, goto, goBack, doctorId = null }) {
 function LogVisit({ user, goto, goBack, preDoctorId = null }) {
   const [doctors, setDoctors] = useState([]);
   const [zones, setZones] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [cityId, setCityId] = useState('');
   const [zoneId, setZoneId] = useState('');
   const [doctorId, setDoctorId] = useState(preDoctorId || '');
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -1551,10 +1611,18 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     (async () => {
       const d = await loadDocs();
       const z = await db.getZones();
+      const c = await db.getCities();
       setZones(z);
+      setCities(c);
       if (preDoctorId) {
         const doc = d.find(x => x.id === preDoctorId);
-        if (doc?.zone_id) setZoneId(String(doc.zone_id));
+        if (doc?.zone_id) {
+          setZoneId(String(doc.zone_id));
+          const zone = z.find(zz => zz.id === doc.zone_id);
+          if (zone?.city_id) setCityId(String(zone.city_id));
+        }
+      } else if (user.home_city_id) {
+        setCityId(String(user.home_city_id));
       }
     })();
     if (navigator.geolocation) {
@@ -1565,11 +1633,14 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     }
   }, [user.id]);
 
-  const filteredDoctors = zoneId ? doctors.filter(d => String(d.zone_id) === zoneId) : doctors;
+  const cityZoneIds = cityId ? zones.filter(z => String(z.city_id) === cityId).map(z => z.id) : null;
+  const filteredDoctors = zoneId 
+    ? doctors.filter(d => String(d.zone_id) === zoneId)
+    : (cityZoneIds ? doctors.filter(d => cityZoneIds.includes(d.zone_id)) : doctors);
   const selectedDoc = doctors.find(d => d.id === doctorId);
 
   const quickAdd = async () => {
-    if (!quickForm.name || !quickForm.specialty || !zoneId) { alert('Name, specialty, zone required'); return; }
+    if (!quickForm.name || !quickForm.specialty || !zoneId) { toast.error('Name, specialty, zone required'); return; }
     const payload = {
       name: quickForm.name, specialty: quickForm.specialty, zone_id: parseInt(zoneId),
       created_by: user.id, score: 0, tier: 'C', is_stub: true
@@ -1594,9 +1665,9 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
   };
 
   const submit = async () => {
-    if (!doctorId) { alert('Select a doctor'); return; }
-    if (!form.met_status) { alert('Mark met status'); return; }
-    if (!form.interest) { alert('Pick interest level'); return; }
+    if (!doctorId) { toast.error('Select a doctor'); return; }
+    if (!form.met_status) { toast.error('Mark met status'); return; }
+    if (!form.interest) { toast.error('Pick interest level'); return; }
 
     setSaving(true);
 
@@ -1629,7 +1700,9 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
     }
 
     const { error } = await db.addVisit(visit);
-    if (error) { alert('Error: ' + error.message); setSaving(false); return; }
+    if (error) { toast.error(error.message || 'Save failed'); setSaving(false); return; }
+
+    activityLog.add({ type: 'visit', doctor: selectedDoc?.name || 'unknown', ts: Date.now() });
 
     let oldTier = selectedDoc?.tier || 'C', oldScore = selectedDoc?.score || 0;
     let newScore = oldScore, newTier = oldTier;
@@ -1713,10 +1786,17 @@ function LogVisit({ user, goto, goBack, preDoctorId = null }) {
       <BackButton goBack={goBack} />
       <h2 className="font-bold text-lg cion-primary-text">Log Visit</h2>
 
+      <Field label="City *">
+        <select className="input" value={cityId} onChange={e => { setCityId(e.target.value); setZoneId(''); setDoctorId(''); }}>
+          <option value="">Select city first...</option>
+          {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </Field>
+
       <Field label="Area / Zone *">
-        <select className="input" value={zoneId} onChange={e => { setZoneId(e.target.value); setDoctorId(''); }}>
-          <option value="">Select area first...</option>
-          {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+        <select className="input" value={zoneId} onChange={e => { setZoneId(e.target.value); setDoctorId(''); }} disabled={!cityId}>
+          <option value="">{cityId ? 'Select area...' : 'Select city first'}</option>
+          {zones.filter(z => !cityId || String(z.city_id) === cityId).map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
         </select>
       </Field>
 
@@ -1845,7 +1925,8 @@ function EditVisit({ user, goto, goBack, visitId }) {
       await db.updateDoctor(doc.id, { score: newScore, tier: newTier, next_followup: form.next_followup || null });
     }
     setSaving(false);
-    alert('Visit updated');
+    toast.success('Visit updated');
+    activityLog.add({ type: 'visit_edit', doctor: doc?.name });
     goBack();
   };
 
@@ -2331,7 +2412,7 @@ function AddReferral({ goto, goBack }) {
     const { error } = await db.addReferral(payload);
     setSaving(false);
     if (error) { alert('Error: ' + error.message); return; }
-    alert('Referral logged');
+    toast.success('Referral logged');
     goBack();
   };
 
@@ -2578,6 +2659,76 @@ function StumpsAdmin({ user, goto, goBack }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PendingSyncWidget() {
+  const [count, setCount] = useState(queue.all().length);
+  const [busy, setBusy] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+
+  useEffect(() => {
+    const tick = setInterval(() => setCount(queue.all().length), 5000);
+    return () => clearInterval(tick);
+  }, []);
+
+  const retry = async () => {
+    setBusy(true);
+    try {
+      const n = await queue.sync();
+      setLastSync(new Date());
+      setCount(queue.all().length);
+      if (n > 0) toast.success('Synced ' + n + ' items');
+      else if (queue.all().length > 0) toast.error('Some items failed to sync');
+      else toast.success('Nothing to sync');
+    } catch (e) {
+      toast.error('Sync failed: ' + e.message);
+    }
+    setBusy(false);
+  };
+
+  if (count === 0 && !lastSync) return null;
+  return (
+    <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded text-sm">
+      <div className="flex justify-between items-center">
+        <div>
+          <p className="font-semibold text-yellow-800">{count} pending sync</p>
+          {lastSync && <p className="text-xs text-gray-600">Last attempt: {lastSync.toLocaleTimeString()}</p>}
+        </div>
+        {count > 0 && (
+          <button onClick={retry} disabled={busy} className="bg-yellow-600 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50">
+            {busy ? '...' : 'Retry now'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RecentActivityWidget() {
+  const [log, setLog] = useState([]);
+  useEffect(() => { setLog(activityLog.all().slice(0, 10)); }, []);
+  if (log.length === 0) return null;
+  return (
+    <div className="bg-white p-3 rounded-lg card-shadow">
+      <h3 className="font-bold mb-2 text-sm cion-primary-text">Recent Activity</h3>
+      {log.map((e, i) => {
+        const ts = new Date(e.ts);
+        const label = e.type === 'visit' ? 'Visit logged' :
+                      e.type === 'doctor_added' ? 'Doctor added' :
+                      e.type === 'doctor_edit' ? 'Doctor edited' :
+                      e.type === 'doctor_complete' ? 'Profile completed' :
+                      e.type === 'edit_pending' ? 'Edit submitted' :
+                      e.type === 'visit_edit' ? 'Visit edited' : e.type;
+        return (
+          <div key={i} className="text-xs py-1 border-b last:border-0">
+            <span className="text-gray-500">{ts.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+            <span className="ml-2">{label}</span>
+            {e.doctor && <span className="text-gray-600"> - {e.doctor}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
